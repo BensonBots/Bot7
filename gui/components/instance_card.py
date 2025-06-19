@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - Instance Card Component (Fixed Hover Issues)
-Clean version without problematic hover effects
+BENSON v2.0 - Instance Card Component (FIXED)
+Fixed status display and button state issues
 """
 
 import tkinter as tk
@@ -33,8 +33,9 @@ class InstanceCard(tk.Frame):
         self._setup_context_menu()
         self._bind_events()
         
-        # Set initial status
+        # FIXED: Set initial status correctly
         self.update_status_display(status)
+        print(f"[InstanceCard] Created card for {name} with status: {status}")
     
     def _setup_ui(self):
         """Setup complete UI structure efficiently"""
@@ -78,29 +79,39 @@ class InstanceCard(tk.Frame):
         self._setup_buttons()
     
     def _setup_buttons(self):
-        """Setup action buttons without hover issues"""
+        """FIXED: Setup action buttons with correct initial states"""
         button_frame = tk.Frame(self.content_frame, bg="#1e2329")
         button_frame.pack(side="right", padx=12, pady=10)
         
-        # Button configurations: (text, bg, command, padx)
-        buttons_config = [
-            ("⋮", "#404040", self._safe_show_context_menu, 2),
-            ("⚙ Modules", "#2196f3", self._safe_show_modules, 10),
-            ("▶ Start", "#00e676", self._safe_toggle_instance, 12)
-        ]
+        # Context menu button
+        context_btn = tk.Button(button_frame, text="⋮", bg="#404040", fg="#ffffff", relief="flat", bd=0,
+                               font=("Segoe UI", 12, "bold"), cursor="hand2", width=2,
+                               command=self._safe_show_context_menu)
+        context_btn.pack(side="right", padx=(0, 6))
         
-        self.action_buttons = {}
-        for text, bg, command, padx in buttons_config:
-            btn = tk.Button(button_frame, text=text, bg=bg, fg="#ffffff", relief="flat", bd=0,
-                           font=("Segoe UI", 9, "bold"), cursor="hand2", padx=padx, pady=6, command=command)
-            btn.pack(side="right", padx=(6, 0) if text != "⋮" else (0, 0))
-            
-            # Store start button for updates
-            if "Start" in text:
-                self.start_btn = btn
-            
-            # Simple hover effects that don't cause boxes
-            self._add_simple_hover_effect(btn, bg)
+        # Modules button
+        modules_btn = tk.Button(button_frame, text="⚙ Modules", bg="#2196f3", fg="#ffffff", relief="flat", bd=0,
+                               font=("Segoe UI", 9, "bold"), cursor="hand2", padx=10, pady=6,
+                               command=self._safe_show_modules)
+        modules_btn.pack(side="right", padx=(6, 0))
+        
+        # FIXED: Start/Stop button with correct initial state based on actual status
+        if self.status == "Running":
+            initial_text = "⏹ Stop"
+            initial_bg = "#ff6b6b"
+        else:  # Stopped, Offline, etc.
+            initial_text = "▶ Start"
+            initial_bg = "#00e676"
+        
+        self.start_btn = tk.Button(button_frame, text=initial_text, bg=initial_bg, fg="#ffffff", relief="flat", bd=0,
+                                  font=("Segoe UI", 9, "bold"), cursor="hand2", padx=12, pady=6,
+                                  command=self._safe_toggle_instance)
+        self.start_btn.pack(side="right", padx=(6, 0))
+        
+        print(f"[InstanceCard] {self.name} button initialized: {initial_text} (status: {self.status})")
+        
+        # Add simple hover effects
+        self._add_simple_hover_effects([context_btn, modules_btn, self.start_btn])
     
     def _setup_context_menu(self):
         """Setup context menu"""
@@ -122,31 +133,40 @@ class InstanceCard(tk.Frame):
                 self.context_menu.add_command(label=item[0], command=item[1])
     
     def _bind_events(self):
-        """Bind essential events without problematic hover effects"""
+        """Bind essential events"""
         clickable = [self, self.main_container, self.content_frame, self.checkbox, self.name_label]
         for element in clickable:
             element.bind("<Button-1>", self._on_click)
             element.bind("<Button-3>", self._on_right_click)
     
-    def _add_simple_hover_effect(self, button, original_color):
-        """Add simple hover effect without causing display issues"""
-        hover_colors = {"#404040": "#555555", "#2196f3": "#1976d2", "#00e676": "#00c853"}
-        hover_color = hover_colors.get(original_color, original_color)
+    def _add_simple_hover_effects(self, buttons):
+        """Add simple hover effects without causing display issues"""
+        hover_colors = {
+            "#404040": "#555555", 
+            "#2196f3": "#1976d2", 
+            "#00e676": "#00c853", 
+            "#ff6b6b": "#f44336",
+            "#ffd93d": "#ffcc02"
+        }
         
-        def on_enter(e):
-            try:
-                button.configure(bg=hover_color)
-            except tk.TclError:
-                pass
-        
-        def on_leave(e):
-            try:
-                button.configure(bg=original_color)
-            except tk.TclError:
-                pass
-        
-        button.bind("<Enter>", on_enter)
-        button.bind("<Leave>", on_leave)
+        for button in buttons:
+            original_color = button.cget("bg")
+            hover_color = hover_colors.get(original_color, original_color)
+            
+            def on_enter(e, btn=button, color=hover_color):
+                try:
+                    btn.configure(bg=color)
+                except tk.TclError:
+                    pass
+            
+            def on_leave(e, btn=button, color=original_color):
+                try:
+                    btn.configure(bg=color)
+                except tk.TclError:
+                    pass
+            
+            button.bind("<Enter>", on_enter)
+            button.bind("<Leave>", on_leave)
     
     # Event handlers
     def _on_click(self, event):
@@ -182,44 +202,69 @@ class InstanceCard(tk.Frame):
             app.on_card_selection_changed()
     
     def update_status(self, new_status):
-        """Update instance status"""
+        """FIXED: Update instance status with proper button state synchronization"""
         if self._destroyed:
             return
         
+        old_status = self.status
         self.status = new_status
+        
+        # Update visual display first
         self.update_status_display(new_status)
         
-        # Update start button
+        # FIXED: Update start button to match the actual status
         if new_status == "Running":
             self.start_btn.configure(text="⏹ Stop", bg="#ff6b6b")
         elif new_status in ["Starting", "Stopping"]:
-            self.start_btn.configure(text="⏸ ...", bg="#ffd93d")
-        else:
+            self.start_btn.configure(text="⏸ Wait", bg="#ffd93d")
+        else:  # Stopped, Offline, Error, etc.
             self.start_btn.configure(text="▶ Start", bg="#00e676")
+        
+        # Log status changes for debugging
+        if old_status != new_status:
+            print(f"[InstanceCard] {self.name} status updated: {old_status} -> {new_status}")
+            print(f"[InstanceCard] {self.name} button now: {self.start_btn.cget('text')}")
     
     def update_status_display(self, new_status):
-        """Update visual status display"""
+        """FIXED: Update visual status display with correct colors and icons"""
         if self._destroyed:
             return
         
-        colors = {"Running": "#00ff88", "Stopped": "#8b949e", "Offline": "#8b949e",
-                 "Starting": "#ffd93d", "Stopping": "#ff9800", "Error": "#ff6b6b"}
+        # Status color mapping - accurate colors for each status
+        colors = {
+            "Running": "#00ff88",      # Bright green for running
+            "Stopped": "#8b949e",      # Gray for stopped
+            "Offline": "#8b949e",      # Gray for offline
+            "Starting": "#ffd93d",     # Yellow for starting
+            "Stopping": "#ff9800",     # Orange for stopping
+            "Error": "#ff6b6b"         # Red for error
+        }
         
         color = colors.get(new_status, "#8b949e")
         icon = self._get_status_icon(new_status)
         
+        # Update status display elements
         self.status_icon.configure(text=icon, fg=color)
         self.status_text.configure(text=new_status, fg=color)
         
-        # Update border color
-        border_colors = {"Running": "#00ff88", "Error": "#ff6b6b", "Starting": "#ffd93d", "Stopping": "#ffd93d"}
-        self.main_container.configure(bg=border_colors.get(new_status, "#343a46"))
+        # Update card border based on status (if not selected)
+        if not self.selected:
+            border_colors = {
+                "Running": "#00ff88",
+                "Error": "#ff6b6b", 
+                "Starting": "#ffd93d",
+                "Stopping": "#ffd93d"
+            }
+            
+            border_color = border_colors.get(new_status, "#343a46")
+            self.main_container.configure(bg=border_color)
     
     # Safe action wrappers
     def _get_app_ref(self):
         return self.app_ref() if self.app_ref else None
     
     def _safe_toggle_instance(self):
+        """Toggle instance based on current status"""
         if self.status == "Running":
             self._safe_stop_instance()
         else:
@@ -274,14 +319,14 @@ class InstanceCard(tk.Frame):
             
             # Add sample log entries
             sample_logs = [
-                "[INFO] Instance initialized successfully",
+                f"[INFO] Instance {self.name} initialized successfully",
                 "[DEBUG] Memory allocation: 2048MB", 
                 "[INFO] Network interface configured",
                 "[DEBUG] Graphics driver loaded",
                 "[INFO] Android system booted",
-                "[INFO] All systems operational",
-                "[DEBUG] Performance monitoring active",
-                "[INFO] Ready for user interaction"
+                f"[INFO] {self.name} ready for user interaction",
+                f"[DEBUG] Current status: {self.status}",
+                "[INFO] All systems operational"
             ]
             
             log_text.configure(state="normal")
@@ -300,7 +345,12 @@ class InstanceCard(tk.Frame):
     
     def _safe_export_config(self):
         try:
-            config = {"name": self.name, "status": self.status, "cpu": self.cpu_usage, "memory": self.memory_usage}
+            config = {
+                "name": self.name, 
+                "status": self.status, 
+                "cpu": self.cpu_usage, 
+                "memory": self.memory_usage
+            }
             filename = f"{self.name}_config.json"
             with open(filename, 'w') as f:
                 json.dump(config, f, indent=2)
@@ -323,12 +373,20 @@ class InstanceCard(tk.Frame):
     
     # Utility methods
     def _get_status_icon(self, status):
-        icons = {"Running": "✓", "Stopped": "○", "Offline": "○", "Starting": "⚡", 
-                "Stopping": "⏹", "Error": "⚠", "Connecting": "↻"}
+        """FIXED: Get appropriate icon for each status"""
+        icons = {
+            "Running": "✓",         # Checkmark for running
+            "Stopped": "○",         # Circle for stopped
+            "Offline": "○",         # Circle for offline
+            "Starting": "⚡",        # Lightning for starting
+            "Stopping": "⏹",        # Stop symbol for stopping
+            "Error": "⚠",          # Warning for error
+            "Connecting": "↻"       # Refresh for connecting
+        }
         return icons.get(status, "○")
     
     def destroy(self):
-        """Clean destroy"""
+        """Clean destroy with proper cleanup"""
         self._destroyed = True
         self.app_ref = None
         super().destroy()

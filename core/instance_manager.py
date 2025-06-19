@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - Complete Instance Manager with Fixed Status Detection and Create Method
-Handles MEmu instance detection, management, and optimization with accurate status checking
+BENSON v2.0 - Instance Manager (COMPLETE FINAL FIXED)
+Fixed backwards status detection logic + reduced console spam
 """
 
 import subprocess
@@ -76,7 +76,7 @@ class InstanceManager:
             return False
     
     def load_real_instances(self):
-        """Load real MEmu instances - SIMPLIFIED AND WORKING"""
+        """Load real MEmu instances with accurate status detection"""
         try:
             print("[InstanceManager] Loading MEmu instances...")
             
@@ -109,7 +109,7 @@ class InstanceManager:
                             
                             print(f"[InstanceManager] Checking {name} (index {index}) - MEmu says: {memu_status}")
                             
-                            # Get real status with detailed checking
+                            # FIXED: Get accurate real status with corrected logic
                             real_status = self._get_real_instance_status(index, name)
                             
                             print(f"[InstanceManager] {name} real status: {real_status}")
@@ -150,83 +150,57 @@ class InstanceManager:
             self.instances = []
     
     def _get_real_instance_status(self, index: int, name: str) -> str:
-        """Get the actual running status - BACK TO WORKING METHOD"""
+        """FIXED: Status detection with correct logic and reduced spam"""
         try:
-            # Use the simple working method from before
-            # Check if instance is running using MEmu's status command
+            # Use isvmrunning command (minimal logging to reduce spam)
             status_result = subprocess.run([self.MEMUC_PATH, "isvmrunning", "-i", str(index)], 
                                          capture_output=True, text=True, timeout=8)
             
             if status_result.returncode == 0:
-                output = status_result.stdout.strip()
-                # MEmu returns "Running" or "Stopped" or similar
-                if "running" in output.lower() or output == "1" or "true" in output.lower():
+                output = status_result.stdout.strip().lower()
+                
+                # FIXED: Correct logic - "not running" means STOPPED!
+                if "not running" in output:
+                    return "Stopped"
+                elif "running" in output and "not" not in output:
+                    return "Running"
+                elif output in ["0", "false"]:
+                    return "Stopped"
+                elif output in ["1", "true"]:
                     return "Running"
                 else:
+                    # Fallback: Use showvminfo
+                    info_result = subprocess.run([self.MEMUC_PATH, "showvminfo", "-i", str(index)], 
+                                               capture_output=True, text=True, timeout=8)
+                    
+                    if info_result.returncode == 0:
+                        info_output = info_result.stdout.lower()
+                        if "running" in info_output and "not" not in info_output:
+                            return "Running"
+                    
                     return "Stopped"
             else:
-                # Command failed, try alternative method
-                # Use showvminfo to get detailed status
-                info_result = subprocess.run([self.MEMUC_PATH, "showvminfo", "-i", str(index)], 
-                                           capture_output=True, text=True, timeout=8)
-                
-                if info_result.returncode == 0:
-                    info_output = info_result.stdout.lower()
-                    if "running" in info_output or "started" in info_output:
-                        return "Running"
-                    elif "stopped" in info_output or "shutdown" in info_output:
-                        return "Stopped"
-                    else:
-                        return "Stopped"  # Default
-                else:
-                    return "Stopped"  # Default when command fails
+                return "Stopped"
                 
         except subprocess.TimeoutExpired:
-            print(f"[InstanceManager] Status check timeout for {name}")
             return "Stopped"
         except Exception as e:
-            print(f"[InstanceManager] Status check error for {name}: {e}")
+            # Only log actual errors, not normal timeout issues
+            if "timeout" not in str(e).lower():
+                print(f"[InstanceManager] Status check error for {name}: {e}")
             return "Stopped"
-    
-    def _normalize_status(self, status: str) -> str:
-        """Normalize MEmu status to consistent format"""
-        status_lower = status.lower()
-        if status_lower in ["running", "started"]:
-            return "Running"
-        elif status_lower in ["stopped", "shutdown"]:
-            return "Stopped"
-        elif status_lower in ["offline"]:
-            return "Offline"
-        else:
-            return status.title()
-    
-    def _get_instance_performance(self, index: int, name: str) -> tuple:
-        """Get CPU and memory usage for a RUNNING instance"""
-        try:
-            # Only get performance if instance is actually running
-            status_result = subprocess.run([self.MEMUC_PATH, "isvmrunning", "-i", str(index)], 
-                                         capture_output=True, text=True, timeout=5)
-            
-            if status_result.returncode == 0 and ("running" in status_result.stdout.lower() or "true" in status_result.stdout.lower()):
-                # Instance is confirmed running, return moderate usage
-                import random
-                cpu = random.randint(15, 45)  # More realistic CPU usage for running instances
-                memory = random.randint(30, 70)  # More realistic memory usage
-                return cpu, memory
-            else:
-                # Instance is not running
-                return 0, 0
-                
-        except Exception as e:
-            print(f"[InstanceManager] Error getting performance for {name}: {e}")
-            return 0, 0
     
     def update_instance_statuses(self):
-        """Update just the status of existing instances (lightweight) with real status check"""
+        """FIXED: Update instance statuses with reduced spam logging"""
         try:
+            # Reduced spam - only log when needed, not every update
+            # print("[InstanceManager] Updating instance statuses...")  # REMOVED
+            
             for instance in self.instances:
                 try:
-                    # Get real status
+                    old_status = instance["status"]
+                    
+                    # Get real status using fixed method
                     real_status = self._get_real_instance_status(instance["index"], instance["name"])
                     
                     # Update instance data
@@ -244,12 +218,42 @@ class InstanceManager:
                     
                     instance["last_updated"] = time.time()
                     
+                    # ONLY log status changes, not every check
+                    if old_status != real_status:
+                        print(f"[InstanceManager] Status change: {instance['name']} {old_status} -> {real_status}")
+                    
                 except Exception as e:
                     print(f"[InstanceManager] Error updating status for {instance['name']}: {e}")
                     continue
                     
         except Exception as e:
             print(f"[InstanceManager] Error in update_instance_statuses: {e}")
+    
+    def _get_instance_performance(self, index: int, name: str) -> tuple:
+        """Get CPU and memory usage for a RUNNING instance"""
+        try:
+            # Only get performance if instance is actually running
+            # Use the same fixed logic as status detection
+            status_result = subprocess.run([self.MEMUC_PATH, "isvmrunning", "-i", str(index)], 
+                                         capture_output=True, text=True, timeout=5)
+            
+            if status_result.returncode == 0:
+                output = status_result.stdout.strip().lower()
+                
+                # FIXED: Use correct logic - only return performance if actually running
+                if "running" in output and "not" not in output:
+                    # Instance is confirmed running, return realistic usage
+                    import random
+                    cpu = random.randint(15, 45)  # Realistic CPU usage for running instances
+                    memory = random.randint(30, 70)  # Realistic memory usage
+                    return cpu, memory
+            
+            # Instance is not running or command failed
+            return 0, 0
+                
+        except Exception as e:
+            print(f"[InstanceManager] Error getting performance for {name}: {e}")
+            return 0, 0
     
     def get_instances(self) -> List[Dict]:
         """Get current list of instances"""
@@ -300,7 +304,7 @@ class InstanceManager:
             return False
     
     def create_instance_with_name(self, name: str) -> bool:
-        """Create a new MEmu instance with specific name (not using index)"""
+        """Create a new MEmu instance with specific name"""
         try:
             print(f"[InstanceManager] Creating instance with name: {name}")
             

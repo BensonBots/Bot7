@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-BENSON v2.0 - Main Application File (OCR Removed)
-Clean version without OCR dependencies
+BENSON v2.0 - Main Application File (FINAL COMPLETE FIXED)
+All fixes applied: Loading timing, console spam, auto-close prevention
 """
 
 import tkinter as tk
@@ -22,167 +22,214 @@ from utils.module_manager import ModuleManager
 class BensonApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        
+
         print("[BensonApp] Initializing application...")
-        
+
         # Configure window
         self.title("BENSON v2.0 - Advanced Edition")
         self.geometry("1200x800")
         self.configure(bg="#0a0e16")
         self.minsize(900, 600)
-        
+        # Hide the main window completely
+        self.withdraw()
+
         # Initialize variables
         self.instance_cards = []
         self.filtered_instances = []
         self.selected_cards = []
         self.search_after_id = None
         self._destroyed = False
-        
+
         # Show loading overlay
         self.loading = LoadingOverlay(self)
         
+        # Make loading window visible and main window hidden
+        self.loading.window.deiconify()
+        self.withdraw()
+
+        # Prevent auto-close
+        self.protocol("WM_DELETE_WINDOW", self._on_window_close)
+
         # Initialize in background with proper timing
         self.after(100, self.initialize_background)
-    
+
     def initialize_background(self):
         """Fixed initialization with proper timing and error handling"""
         def init_worker():
             try:
-                # Step 1: Initialize core systems
-                self.loading.update_status("Connecting to MEmu...")
+                self.after(0, lambda: self.loading.update_status("Connecting to MEmu..."))
+                print("[Init] Step 1: Connecting to MEmu")
                 time.sleep(0.2)
-                
+
                 self.instance_manager = InstanceManager()
-                
-                # Step 2: Load instances - WAIT for this to complete
-                self.loading.update_status("Loading MEmu instances...")
+                print("[Init] Step 2: InstanceManager created")
+
+                self.after(0, lambda: self.loading.update_status("Loading MEmu instances..."))
                 time.sleep(0.2)
-                
-                # Force load instances and wait
+
                 self.instance_manager.load_real_instances()
+                print("[Init] Step 3: Instances loaded")
                 instances_count = len(self.instance_manager.get_instances())
-                
-                # Step 3: Initialize modules BEFORE UI setup
-                self.loading.update_status("Initializing modules...")
+                print(f"[Init] Instances count: {instances_count}")
+
+                self.after(0, lambda: self.loading.update_status("Initializing modules..."))
                 time.sleep(0.2)
-                
+
                 self.module_manager = ModuleManager(self)
                 self.module_manager.initialize_modules()
-                
-                # Step 4: Initialize utilities
-                self.loading.update_status("Setting up utilities...")
+                print("[Init] Step 4: Modules initialized")
+
+                self.after(0, lambda: self.loading.update_status("Setting up utilities..."))
                 time.sleep(0.2)
-                
+
                 self.instance_ops = InstanceOperations(self)
                 self.ui_manager = UIManager(self)
-                
-                # Step 5: Setup keyboard shortcuts
+                print("[Init] Step 5: Utilities set up")
+
                 self.bind_all("<Control-r>", lambda e: self.instance_ops.refresh_instances())
                 self.bind_all("<Control-a>", lambda e: self.instance_ops.select_all_instances())
                 self.bind_all("<Delete>", lambda e: self.instance_ops.delete_selected_instances_with_loading())
-                
-                # Pass instance count to completion
+
                 self.after(0, lambda: self.complete_initialization(instances_count))
-                
+
             except Exception as e:
-                print(f"[BensonApp] Initialization error: {e}")
-                self.after(0, lambda: self.show_init_error(str(e)))
-        
-        # Run initialization in background thread
+                print(f"[Init ERROR] {e}")
+                import traceback
+                traceback.print_exc()
+                err = str(e)
+                self.after(0, lambda: self.show_init_error(err))
+
         threading.Thread(target=init_worker, daemon=True).start()
-    
+
     def complete_initialization(self, instances_count):
-        """Fixed completion - LOADING SCREEN STAYS UNTIL ACTUALLY READY"""
+        """FIXED: Keep loading screen until GUI is actually ready"""
         try:
+            print("[BensonApp] Starting UI setup...")
             self.loading.update_status("Building interface...")
-            time.sleep(0.5)
+
+            def build_ui_in_chunks():
+                # Setup UI in smaller chunks to prevent blocking
+                self.ui_manager.setup_header()
+                self.after(10, lambda: self._continue_ui_setup(1, instances_count))
+
+            # Start UI setup after a short delay
+            self.after(100, build_ui_in_chunks)
+
+        except Exception as e:
+            print(f"[BensonApp] UI setup error: {e}")
+            if hasattr(self, 'loading'):
+                self.loading.close()
+            self.show_init_error(str(e))
+
+    def _continue_ui_setup(self, step, instances_count):
+        """Continue UI setup in steps to prevent blocking"""
+        try:
+            # Update loading status with current step
+            status_messages = {
+                1: "Setting up controls...",
+                2: "Building main content...",
+                3: "Initializing console...",
+                4: "Finalizing interface...",
+                5: "Loading instances..."
+            }
             
-            print("[BensonApp] Setting up UI...")
-            self.setup_ui()
+            if step <= 5:
+                self.loading.update_status(status_messages.get(step, "Building interface..."))
             
-            # Critical: Don't close loading until EVERYTHING is actually rendered
-            self.loading.update_status("Rendering instance cards...")
-            
-            # Force multiple complete UI updates
-            for i in range(10):  # More update cycles
-                self.update_idletasks()
-                self.update()
-                time.sleep(0.1)
-            
-            # Wait for cards to actually render
-            time.sleep(2.0)  # Much longer wait
-            
-            self.loading.update_status("Starting background services...")
-            time.sleep(0.3)
-            
-            # Start background tasks
+            # Process one step at a time with minimal blocking
+            if step == 1:
+                self.ui_manager.setup_controls()
+                self.after(50, lambda: self._continue_ui_setup(2, instances_count))
+            elif step == 2:
+                self.ui_manager.setup_main_content()
+                self.after(50, lambda: self._continue_ui_setup(3, instances_count))
+            elif step == 3:
+                self.ui_manager.setup_console()
+                self.after(50, lambda: self._continue_ui_setup(4, instances_count))
+            elif step == 4:
+                self.ui_manager.setup_footer()
+                self.after(50, lambda: self._continue_ui_setup(5, instances_count))
+            elif step == 5:
+                # Start loading instances
+                self.load_instances()
+                # Move to next step
+                self.after(50, lambda: self._continue_ui_setup(6, instances_count))
+            elif step == 6:
+                # Initial console messages
+                self.add_console_message("BENSON v2.0 Advanced Edition started")
+                instances_count = len(self.instance_manager.get_instances())
+                self.add_console_message(f"Loaded {instances_count} MEmu instances")
+
+                # Module status message
+                module_status = self.module_manager.get_module_status()
+                self.add_console_message(f"🔧 Modules: {module_status['available_modules']}/{module_status['total_instances']} available, {module_status['auto_startup_enabled']} auto-startup enabled")
+
+                # Start final checks
+                self.after(100, lambda: self._finish_initialization(instances_count))
+
+        except Exception as e:
+            print(f"[BensonApp] UI setup error in step {step}: {e}")
+            if hasattr(self, 'loading'):
+                self.loading.close()
+            self.show_init_error(str(e))
+
+    def _finish_initialization(self, instances_count):
+        """Final initialization steps"""
+        try:
+            self.loading.update_status("Starting services...")
             self.start_background_tasks()
             
-            self.loading.update_status("Finalizing...")
+            def check_ready():
+                if len(self.instance_cards) == instances_count:
+                    # First close loading screen
+                    self.loading.close()
+                    
+                    # Small delay to ensure loading is gone
+                    self.after(100, self._show_main_window)
+                else:
+                    # Update status to show progress
+                    self.loading.update_status(f"Loading instances ({len(self.instance_cards)}/{instances_count})...")
+                    # Check again in 100ms
+                    self.after(100, check_ready)
             
-            # More forced updates
-            for i in range(5):
-                self.update_idletasks()
-                self.update()
-                time.sleep(0.2)
-            
-            # Force counter update
-            self.force_counter_update()
-            
-            # Final status update
-            self.loading.update_status("Ready!")
-            time.sleep(0.5)
-            
-            # ONLY close loading screen after everything is actually ready
-            # Don't use after() - do it synchronously
-            self._complete_loading()
-            
-            # Auto-startup check much later
-            self.after(5000, self.check_module_auto_startup)
-            
-            print(f"[BensonApp] Initialization complete with {instances_count} instances!")
-            
+            # Start checking if ready
+            self.after(100, check_ready)
+
         except Exception as e:
-            self.loading.close()
+            print(f"[BensonApp] Error in finish initialization: {e}")
+            if hasattr(self, 'loading'):
+                self.loading.close()
             self.show_init_error(str(e))
-    
-    def _complete_loading(self):
-        """Complete the loading process after ensuring GUI is ready"""
+
+    def _show_main_window(self):
+        """Show the main window"""
         try:
-            # Wait even longer and do more updates
-            time.sleep(0.5)
+            # Show main window
+            self.deiconify()
+            self.lift()  # Bring to front
+            self.focus_force()  # Force focus
             
-            # Multiple rounds of UI updates to ensure everything is rendered
-            for i in range(5):
-                self.update_idletasks()
-                time.sleep(0.1)
-                self.update()
-                time.sleep(0.1)
-            
-            # Give extra time for instance cards to fully render
-            time.sleep(0.5)
-            
-            # Final update round
+            # Final updates
             self.update_idletasks()
             self.update()
             
-            # Close loading screen
-            self.loading.close()
-            
-            # One more update after loading screen is gone
-            time.sleep(0.2)
-            self.update_idletasks()
-            
-            # Add final initialization message
-            self.add_console_message("✅ BENSON v2.0 ready - GUI fully loaded and responsive")
-            
+            # Add console message
+            self.add_console_message(f"✅ BENSON v2.0 ready with {len(self.instance_manager.get_instances())} instances")
+            self.after(5000, self.check_module_auto_startup)
+
         except Exception as e:
-            print(f"[BensonApp] Error completing loading: {e}")
-            try:
-                self.loading.close()
-            except:
-                pass
-    
+            print(f"[BensonApp] Error showing main window: {e}")
+            self.show_init_error(str(e))
+
+    def _actually_close_loading(self):
+        """Close loading screen only when everything is ready"""
+        try:
+            self.loading.close()
+            self.add_console_message(f"✅ BENSON v2.0 ready with {len(self.instance_manager.get_instances())} instances")
+            self.after(5000, self.check_module_auto_startup)
+        except Exception as e:
+            print(f"[BensonApp] Error closing loading: {e}")
+
     def check_module_auto_startup(self):
         """FIXED: Proper auto-startup check with timing"""
         try:
@@ -191,29 +238,22 @@ class BensonApp(tk.Tk):
                 self.add_console_message("⏳ Module manager not ready, retrying auto-startup check...")
                 self.after(1000, self.check_module_auto_startup)
                 return
-            
+
             self.add_console_message("🔍 Checking for auto-startup modules...")
-            
+
             # Call the fixed auto-startup check
             self.module_manager.check_auto_startup()
-            
+
         except Exception as e:
             self.add_console_message(f"❌ Auto-startup check error: {e}")
-    
+
     def show_init_error(self, error):
         """Show initialization error"""
         from tkinter import messagebox
-        messagebox.showerror("Initialization Error", 
+        messagebox.showerror("Initialization Error",
                            f"Failed to initialize BENSON:\n\n{error}\n\nThe application will close.")
         self.destroy()
-    
-    def start_background_optimization(self):
-        """REMOVED - No startup optimization, only optimize when user starts instance"""
-        # Optimization now only happens when user clicks "Start" on an instance
-        # This prevents unnecessary optimization checks on startup
-        self.add_console_message("💡 Optimization will run automatically when you start instances")
-        pass
-    
+
     def setup_ui(self):
         """Setup the main user interface using UI manager"""
         self.ui_manager.setup_header()
@@ -221,207 +261,198 @@ class BensonApp(tk.Tk):
         self.ui_manager.setup_main_content()
         self.ui_manager.setup_console()
         self.ui_manager.setup_footer()
-        
+
         # Load initial instances
         self.load_instances()
-        
+
         # Initial console messages
         self.add_console_message("BENSON v2.0 Advanced Edition started")
         instances_count = len(self.instance_manager.get_instances())
         self.add_console_message(f"Loaded {instances_count} MEmu instances")
-        
+
         # Module status message
         module_status = self.module_manager.get_module_status()
         self.add_console_message(f"🔧 Modules: {module_status['available_modules']}/{module_status['total_instances']} available, {module_status['auto_startup_enabled']} auto-startup enabled")
-        
-        # NO STARTUP OPTIMIZATION - only optimize when user clicks start
-    
+
     # Search functionality with debouncing
     def on_search_change_debounced(self, *args):
         """Handle search text change with debouncing"""
         # Cancel previous scheduled search
         if self.search_after_id:
             self.after_cancel(self.search_after_id)
-        
+
         # Get current search text
         query = self.search_var.get()
         if query == "Search instances...":
             return
-        
+
         # Schedule new search after 150ms delay
         self.search_after_id = self.after(150, lambda: self.filter_instances_fast(query))
-    
+
     def on_search_focus_in(self, event):
         """Handle search focus in"""
         if self.search_entry.get() == "Search instances...":
             self.search_entry.delete(0, "end")
             self.search_entry.configure(fg="#ffffff")
-    
+
     def on_search_focus_out(self, event):
         """Handle search focus out"""
         if not self.search_entry.get():
             self.search_entry.insert(0, "Search instances...")
             self.search_entry.configure(fg="#8b949e")
-    
+
     def filter_instances_fast(self, query):
         """Fast instance filtering without heavy operations"""
         if not query or query == "Search instances...":
             # Show all instances
             self.show_all_instances()
             return
-        
+
         # Hide/show existing cards instead of recreating them
         query_lower = query.lower()
         visible_cards = []
-        
+
         for card in self.instance_cards:
             if query_lower in card.name.lower():
                 card.grid()  # Show the card
                 visible_cards.append(card)
             else:
                 card.grid_remove()  # Hide the card
-        
+
         # Reposition visible cards
         self.reposition_cards(visible_cards)
-    
+
     def show_all_instances(self):
         """Show all instance cards"""
         for card in self.instance_cards:
             card.grid()
         self.reposition_all_cards()
-    
+
     def reposition_cards(self, cards):
         """Reposition given cards in proper layout"""
         # Clear existing positioning
         for card in cards:
             card.grid_remove()
-        
+
         # Always use 2-column grid layout
         for i, card in enumerate(cards):
             row = i // 2
             col = i % 2
             card.grid(row=row, column=col, padx=4, pady=2, sticky="e" if col == 0 else "w", in_=self.instances_container)
             card.configure(width=580)
-            
+
             # Configure column weights to center cards
             self.instances_container.grid_columnconfigure(col, weight=1)
-    
+
     def reposition_all_cards(self):
         """Reposition all cards in proper layout"""
         self.reposition_cards(self.instance_cards)
-    
+
     def force_counter_update(self):
         """Force update the instance counter"""
         instances_count = len(self.instance_manager.get_instances())
         new_text = f"⚡ MEmu Instances ({instances_count})"
-        
+
         if hasattr(self, 'instances_header'):
             self.instances_header.configure(text=new_text)
             self.update_idletasks()
-        
+
         return instances_count
-    
+
     def load_instances(self):
-        """Load and display instance cards"""
+        """Load instances in a non-blocking way"""
         print("[BensonApp] Loading instances...")
+        print("[BensonApp] Force updating instance statuses...")
         
-        # Clear existing cards
+        instances = self.instance_manager.get_instances()
+        total_instances = len(instances)
+        
+        # Clear existing cards if any
         for card in self.instance_cards:
             card.destroy()
-        self.instance_cards.clear()
-        self.selected_cards.clear()
+        self.instance_cards = []
         
-        # Get instances from manager
-        instances = self.instance_manager.get_instances()
-        
-        if len(instances) == 0:
-            # No instances - show message
-            no_instances_label = tk.Label(
-                self.instances_container,
-                text="No MEmu instances found\nClick 'Create' to add a new instance",
-                bg="#0a0e16",
-                fg="#8b949e",
-                font=("Segoe UI", 12),
-                justify="center"
-            )
-            no_instances_label.grid(row=0, column=0, columnspan=2, pady=50)
-            
-        else:
-            # Import the optimized instance card
-            from gui.components.instance_card import InstanceCard
-            
-            # Create instance cards
-            for i, instance in enumerate(instances):
-                card = InstanceCard(
-                    self.instances_container,
-                    name=instance["name"],
-                    status=instance["status"],
-                    cpu_usage=instance["cpu"],
-                    memory_usage=instance["memory"],
-                    app_ref=self
-                )
+        def create_next_card(index=0):
+            if index >= total_instances:
+                # All cards created, schedule final UI update
+                self.after(100, lambda: self._continue_ui_setup(6, total_instances))
+                return
                 
-                self.instance_cards.append(card)
+            instance = instances[index]
+            name = instance["name"]
+            status = instance["status"]
             
-            # Position cards properly
-            self.reposition_all_cards()
+            print(f"[BensonApp] Creating card for {name} - Status: {status}")
+            
+            def do_create():
+                # Create card frame
+                card = self.ui_manager.create_instance_card(name, status)
+                self.instance_cards.append(card)
+                
+                # Update loading status
+                self.loading.update_status(f"Loading instance {index + 1}/{total_instances}: {name}")
+                
+                # Force immediate update of loading status
+                self.loading.window.update_idletasks()
+                
+                # Schedule next card creation with a small delay
+                self.after(100, lambda: create_next_card(index + 1))
+            
+            # Schedule card creation for next event loop
+            self.after(1, do_create)
         
-        # Force counter update
-        self.force_counter_update()
-        
-        # Refresh modules when instances change
-        if hasattr(self, 'module_manager'):
-            self.module_manager.refresh_modules()
-    
+        # Start creating cards
+        create_next_card()
+
     def on_card_selection_changed(self):
         """Called when a card's selection state changes"""
         self.selected_cards = [card for card in self.instance_cards if card.selected]
         print(f"[BensonApp] Selection changed: {len(self.selected_cards)} cards selected")
-    
+
     # Instance Operations (delegated to instance operations handler)
     def start_instance(self, name):
         """Start an instance with auto-optimization - ONLY when user clicks start"""
         # Auto-optimize before starting
         def start_with_optimization():
             self.add_console_message(f"🔧 Auto-optimizing {name} before start...")
-            
+
             # Optimize the instance first
             success = self.instance_manager.optimize_instance_with_settings(name)
             if success:
                 self.add_console_message(f"✅ {name} optimized successfully")
             else:
                 self.add_console_message(f"⚠ {name} optimization failed, starting anyway...")
-            
+
             # Then start the instance
             self.instance_ops.start_instance(name)
-        
+
         # Run optimization and start in background
         threading.Thread(target=start_with_optimization, daemon=True).start()
-    
+
     def stop_instance(self, name):
         """Stop an instance"""
         self.instance_ops.stop_instance(name)
-    
+
     def delete_instance_card_with_loading(self, card):
         """Delete a single instance card with loading"""
         self.instance_ops.delete_instance_card_with_loading(card)
-    
-    # UI Methods (delegated to UI manager) - Analytics and Settings removed
+
+    # UI Methods (delegated to UI manager)
     def show_modules(self, instance_name):
         """Show modules window for an instance"""
         self.ui_manager.show_modules(instance_name)
-    
+
     # Console operations
     def add_console_message(self, message):
         """Add a message to the console with error handling"""
         if not hasattr(self, 'console_text'):
             print(f"[Console] {message}")
             return
-        
+
         try:
             timestamp = datetime.now().strftime("[%H:%M:%S]")
             full_message = f"{timestamp} {message}\n"
-            
+
             self.console_text.configure(state="normal")
             self.console_text.insert("end", full_message)
             self.console_text.configure(state="disabled")
@@ -429,7 +460,7 @@ class BensonApp(tk.Tk):
         except (tk.TclError, AttributeError):
             # Handle case where console is not ready or destroyed
             print(f"[Console] {message}")
-    
+
     def clear_console(self):
         """Clear the console"""
         try:
@@ -439,43 +470,42 @@ class BensonApp(tk.Tk):
             self.add_console_message("Console cleared")
         except (tk.TclError, AttributeError):
             pass
-    
+
     def start_background_tasks(self):
-        """Optimized background tasks with reduced frequency to prevent GUI lag"""
+        """FIXED: Background tasks with reduced frequency to prevent spam"""
         def background_updates():
             while not self._destroyed:
                 try:
-                    time.sleep(60)  # Reduced frequency: every 60 seconds instead of 30
+                    time.sleep(300)  # Every 5 minutes instead of 60 seconds
                     if hasattr(self, 'console_text') and not self._destroyed:
                         messages = [
                             "System health check completed",
-                            "Performance metrics updated", 
+                            "Performance metrics updated",
                             "Instance synchronization successful"
                         ]
                         import random
-                        if random.random() > 0.9:  # Much less frequent messages (10% chance)
+                        if random.random() > 0.98:  # Much less frequent (2% chance)
                             self.add_console_message(random.choice(messages))
                 except Exception as e:
                     print(f"[BackgroundUpdates] Error: {e}")
                     break
-                    
+
         def status_monitor():
-            """Optimized status monitor with less frequent updates to reduce lag"""
+            """FIXED: Status monitor with reduced frequency and no spam"""
             last_status = {}
             full_refresh_counter = 0
-            
+
             while not self._destroyed:
                 try:
-                    time.sleep(5)  # Increased from 3 to 5 seconds
-                    
+                    time.sleep(15)  # Every 15 seconds instead of 5
+
                     # Skip if no instance manager or destroyed
                     if not hasattr(self, 'instance_manager') or self._destroyed:
                         continue
-                    
-                    # Do a full refresh every 60 seconds (12 * 5s) instead of 30s
+
+                    # Do a full refresh every 2 minutes instead of 1 minute
                     full_refresh_counter += 1
-                    if full_refresh_counter >= 12:
-                        # Only do full refresh if not currently busy
+                    if full_refresh_counter >= 8:  # 8 * 15s = 2 minutes
                         if not getattr(self, '_updating_instances', False):
                             self._updating_instances = True
                             try:
@@ -491,29 +521,29 @@ class BensonApp(tk.Tk):
                                 self.instance_manager.update_instance_statuses()
                             finally:
                                 self._updating_instances = False
-                    
+
                     # Only update UI if not currently updating
                     if not getattr(self, '_updating_instances', False):
                         instances = self.instance_manager.get_instances()
-                        
+
                         # Batch UI updates to reduce lag
                         ui_updates = []
-                        
+
                         for card in self.instance_cards:
                             if self._destroyed:
                                 break
-                                
+
                             for instance in instances:
                                 if instance["name"] == card.name:
                                     real_status = instance["status"]
-                                    
+
                                     # Only update if status actually changed
                                     last_known = last_status.get(card.name)
                                     if last_known != real_status:
                                         last_status[card.name] = real_status
                                         ui_updates.append((card, real_status))
                                     break
-                        
+
                         # Apply all UI updates at once on main thread
                         if ui_updates and not self._destroyed:
                             try:
@@ -521,21 +551,21 @@ class BensonApp(tk.Tk):
                             except tk.TclError:
                                 # App is closing
                                 return
-                                
+
                 except Exception as e:
                     print(f"[StatusMonitor] Error: {e}")
-                    time.sleep(5)  # Wait before retrying on error
-                    
+                    time.sleep(15)
+
         # Start background threads with daemon=True
         threading.Thread(target=background_updates, daemon=True, name="BackgroundUpdates").start()
         threading.Thread(target=status_monitor, daemon=True, name="StatusMonitor").start()
-    
+
     def _batch_update_cards(self, ui_updates):
         """Batch update multiple cards at once to reduce UI lag"""
         try:
             if self._destroyed:
                 return
-            
+
             # Update cards in batches to prevent UI freezing
             for card, status in ui_updates:
                 if not self._destroyed and hasattr(card, 'update_status'):
@@ -544,18 +574,25 @@ class BensonApp(tk.Tk):
                     except (tk.TclError, AttributeError):
                         # Card may have been destroyed
                         continue
-            
+
             # Force UI update after batch
             if not self._destroyed:
                 self.update_idletasks()
-                
+
         except Exception as e:
             print(f"[BatchUpdate] Error: {e}")
-    
+
+    def _on_window_close(self):
+        """Handle window close properly"""
+        try:
+            self.destroy()
+        except:
+            pass
+
     def destroy(self):
         """Enhanced destroy with proper cleanup"""
         self._destroyed = True
-        
+
         # Stop any running modules
         if hasattr(self, 'module_manager'):
             try:
@@ -569,14 +606,14 @@ class BensonApp(tk.Tk):
                         pass
             except:
                 pass
-        
+
         # Clean up loading overlay
         if hasattr(self, 'loading'):
             try:
                 self.loading.close()
             except:
                 pass
-        
+
         # Call parent destroy
         super().destroy()
 

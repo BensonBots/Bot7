@@ -398,3 +398,34 @@ class UIManager:
         
         from gui.dialogs.modules_window import ModulesWindow
         ModulesWindow(self.app, instance_name, app_ref=self.app)
+
+    def create_instance_card(self, name, status):
+        """Create a new instance card"""
+        from gui.components.instance_card import InstanceCard
+        
+        # Create the card without immediate UI updates
+        card = InstanceCard(
+            self.app.instances_container,
+            name=name,
+            status=status,
+            cpu_usage=0,
+            memory_usage=0,
+            app_ref=self.app
+        )
+        
+        # Schedule UI updates for next event loop
+        def update_ui():
+            # Position all cards
+            self.app.reposition_all_cards()
+            
+            # Force counter update
+            self.app.force_counter_update()
+            
+            # Refresh modules when instances change
+            if hasattr(self.app, 'module_manager'):
+                self.app.module_manager.refresh_modules()
+        
+        # Schedule UI updates for next event loop
+        self.app.after(1, update_ui)
+            
+        return card
