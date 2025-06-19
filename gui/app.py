@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 BENSON v2.0 - Main Application File (FINAL COMPLETE FIXED)
-All fixes applied: Loading timing, console spam, auto-close prevention
+All fixes applied: Loading timing, console spam, auto-close prevention, non-blocking instance loading
 """
 
 import tkinter as tk
@@ -174,21 +174,33 @@ class BensonApp(tk.Tk):
             self.show_init_error(str(e))
 
     def _finish_initialization(self, instances_count):
-        """Final initialization steps"""
+        """FIXED: Final initialization with proper timing"""
         try:
             self.loading.update_status("Starting services...")
             self.start_background_tasks()
             
             def check_ready():
-                if len(self.instance_cards) == instances_count:
-                    # First close loading screen
-                    self.loading.close()
+                # FIXED: More thorough readiness check
+                cards_ready = len(self.instance_cards) == instances_count
+                ui_ready = hasattr(self, 'console_text') and hasattr(self, 'instances_container')
+                
+                if cards_ready and ui_ready:
+                    # FIXED: Extended delay to ensure GUI is fully rendered
+                    def final_show():
+                        try:
+                            # Close loading screen
+                            self.loading.close()
+                            
+                            # FIXED: Longer delay before showing main window
+                            self.after(500, self._show_main_window)
+                        except Exception as e:
+                            print(f"[BensonApp] Error in final show: {e}")
+                            self._show_main_window()
                     
-                    # Small delay to ensure loading is gone
-                    self.after(100, self._show_main_window)
+                    self.after(200, final_show)
                 else:
                     # Update status to show progress
-                    self.loading.update_status(f"Loading instances ({len(self.instance_cards)}/{instances_count})...")
+                    self.loading.update_status(f"Finalizing ({len(self.instance_cards)}/{instances_count})...")
                     # Check again in 100ms
                     self.after(100, check_ready)
             
@@ -202,33 +214,39 @@ class BensonApp(tk.Tk):
             self.show_init_error(str(e))
 
     def _show_main_window(self):
-        """Show the main window"""
+        """FIXED: Show the main window with proper sequencing"""
         try:
-            # Show main window
-            self.deiconify()
-            self.lift()  # Bring to front
-            self.focus_force()  # Force focus
-            
-            # Final updates
+            # FIXED: Ensure everything is fully rendered first
             self.update_idletasks()
             self.update()
             
-            # Add console message
-            self.add_console_message(f"✅ BENSON v2.0 ready with {len(self.instance_manager.get_instances())} instances")
-            self.after(5000, self.check_module_auto_startup)
+            # Show main window
+            self.deiconify()
+            
+            # FIXED: Give window time to render before bringing to front
+            def bring_to_front():
+                try:
+                    self.lift()  # Bring to front
+                    self.focus_force()  # Force focus
+                    
+                    # Final updates
+                    self.update_idletasks()
+                    
+                    # Add console message
+                    self.add_console_message(f"✅ BENSON v2.0 ready with {len(self.instance_manager.get_instances())} instances")
+                    
+                    # Check module auto-startup after everything is ready
+                    self.after(3000, self.check_module_auto_startup)
+                    
+                except Exception as e:
+                    print(f"[BensonApp] Error bringing window to front: {e}")
+            
+            # FIXED: Delay bringing to front to ensure rendering is complete
+            self.after(300, bring_to_front)
 
         except Exception as e:
             print(f"[BensonApp] Error showing main window: {e}")
             self.show_init_error(str(e))
-
-    def _actually_close_loading(self):
-        """Close loading screen only when everything is ready"""
-        try:
-            self.loading.close()
-            self.add_console_message(f"✅ BENSON v2.0 ready with {len(self.instance_manager.get_instances())} instances")
-            self.after(5000, self.check_module_auto_startup)
-        except Exception as e:
-            print(f"[BensonApp] Error closing loading: {e}")
 
     def check_module_auto_startup(self):
         """FIXED: Proper auto-startup check with timing"""
@@ -328,25 +346,174 @@ class BensonApp(tk.Tk):
             card.grid()
         self.reposition_all_cards()
 
-    def reposition_cards(self, cards):
-        """Reposition given cards in proper layout"""
-        # Clear existing positioning
-        for card in cards:
-            card.grid_remove()
+    def load_instances(self):
+        """FIXED: Load instances without blocking loading animation"""
+        print("[BensonApp] Loading instances...")
+        
+        # Get instances data in background first
+        def get_instances_data():
+            try:
+                instances = self.instance_manager.get_instances()
+                total_instances = len(instances)
+                
+                # Schedule UI creation on main thread
+                self.after(0, lambda: self._create_instance_cards(instances, total_instances))
+                
+            except Exception as e:
+                print(f"[BensonApp] Error getting instances: {e}")
+                self.after(0, lambda: self._create_instance_cards([], 0))
+        
+        # Run data fetching in background to not block animations
+        threading.Thread(target=get_instances_data, daemon=True).start()
 
-        # Always use 2-column grid layout
-        for i, card in enumerate(cards):
-            row = i // 2
-            col = i % 2
-            card.grid(row=row, column=col, padx=4, pady=2, sticky="e" if col == 0 else "w", in_=self.instances_container)
-            card.configure(width=580)
+    def _create_instance_cards(self, instances, total_instances):
+        """FIXED: Create instance cards with better scheduling"""
+        print(f"[BensonApp] Creating {total_instances} instance cards...")
+        
+        # Clear existing cards if any
+        for card in self.instance_cards:
+            try:
+                card.destroy()
+            except:
+                pass
+        self.instance_cards = []
+        
+        # Update loading status
+        if hasattr(self, 'loading'):
+            self.loading.update_status(f"Creating {total_instances} instance cards...")
+        
+        # Create cards in small batches to prevent freezing
+        batch_size = 2  # Process 2 cards at a time
+        
+        def create_batch(start_index=0):
+            if start_index >= total_instances:
+                # All cards created
+                print(f"[BensonApp] Finished creating {len(self.instance_cards)} cards")
+                self.after(50, self._finalize_instance_loading)
+                return
+            
+            # Create this batch
+            end_index = min(start_index + batch_size, total_instances)
+            
+            for i in range(start_index, end_index):
+                instance = instances[i]
+                name = instance["name"]
+                status = instance["status"]
+                
+                print(f"[BensonApp] Creating card {i+1}/{total_instances}: {name}")
+                
+                try:
+                    # Create card
+                    card = self.ui_manager.create_instance_card(name, status)
+                    if card:
+                        self.instance_cards.append(card)
+                        
+                        # Position card immediately
+                        row = i // 2
+                        col = i % 2
+                        card.grid(row=row, column=col, padx=4, pady=2, 
+                                sticky="e" if col == 0 else "w", 
+                                in_=self.instances_container)
+                        
+                except Exception as e:
+                    print(f"[BensonApp] Error creating card for {name}: {e}")
+            
+            # Update loading status
+            if hasattr(self, 'loading'):
+                self.loading.update_status(f"Created {end_index}/{total_instances} instances...")
+            
+            # Force small UI update
+            self.update_idletasks()
+            
+            # Schedule next batch with small delay to keep animations smooth
+            self.after(50, lambda: create_batch(end_index))
+        
+        # Start creating batches
+        if total_instances > 0:
+            create_batch()
+        else:
+            self._finalize_instance_loading()
 
-            # Configure column weights to center cards
-            self.instances_container.grid_columnconfigure(col, weight=1)
+    def _finalize_instance_loading(self):
+        """Finalize instance loading and reposition cards"""
+        try:
+            print(f"[BensonApp] Finalizing {len(self.instance_cards)} instance cards")
+            
+            # FIXED: Reposition all cards properly
+            self.reposition_all_cards()
+            
+            # Update counter
+            self.force_counter_update()
+            
+            # Final UI update
+            self.update_idletasks()
+            
+            print("[BensonApp] Instance loading completed")
+            
+        except Exception as e:
+            print(f"[BensonApp] Error finalizing instance loading: {e}")
 
     def reposition_all_cards(self):
-        """Reposition all cards in proper layout"""
-        self.reposition_cards(self.instance_cards)
+        """FIXED: Reposition all cards in proper 2-column layout"""
+        try:
+            print(f"[BensonApp] Repositioning {len(self.instance_cards)} cards")
+            
+            # Clear all existing grid positions
+            for card in self.instance_cards:
+                try:
+                    card.grid_remove()
+                except:
+                    pass
+            
+            # Configure grid columns
+            self.instances_container.grid_columnconfigure(0, weight=1, minsize=580)
+            self.instances_container.grid_columnconfigure(1, weight=1, minsize=580)
+            
+            # Position all cards in 2-column layout
+            for i, card in enumerate(self.instance_cards):
+                try:
+                    row = i // 2
+                    col = i % 2
+                    card.grid(row=row, column=col, padx=4, pady=2, 
+                            sticky="e" if col == 0 else "w", 
+                            in_=self.instances_container)
+                    card.configure(width=580)
+                except Exception as e:
+                    print(f"[BensonApp] Error positioning card {i}: {e}")
+            
+            print(f"[BensonApp] Repositioned {len(self.instance_cards)} cards")
+            
+        except Exception as e:
+            print(f"[BensonApp] Error in reposition_all_cards: {e}")
+
+    def reposition_cards(self, cards):
+        """FIXED: Reposition given cards in proper layout"""
+        try:
+            # Clear existing positioning for these cards
+            for card in cards:
+                try:
+                    card.grid_remove()
+                except:
+                    pass
+            
+            # Position cards in 2-column layout
+            for i, card in enumerate(cards):
+                try:
+                    row = i // 2
+                    col = i % 2
+                    card.grid(row=row, column=col, padx=4, pady=2, 
+                            sticky="e" if col == 0 else "w", 
+                            in_=self.instances_container)
+                    card.configure(width=580)
+                except Exception as e:
+                    print(f"[BensonApp] Error positioning card {i}: {e}")
+            
+            # Configure column weights
+            self.instances_container.grid_columnconfigure(0, weight=1)
+            self.instances_container.grid_columnconfigure(1, weight=1)
+            
+        except Exception as e:
+            print(f"[BensonApp] Error in reposition_cards: {e}")
 
     def force_counter_update(self):
         """Force update the instance counter"""
@@ -358,51 +525,6 @@ class BensonApp(tk.Tk):
             self.update_idletasks()
 
         return instances_count
-
-    def load_instances(self):
-        """Load instances in a non-blocking way"""
-        print("[BensonApp] Loading instances...")
-        print("[BensonApp] Force updating instance statuses...")
-        
-        instances = self.instance_manager.get_instances()
-        total_instances = len(instances)
-        
-        # Clear existing cards if any
-        for card in self.instance_cards:
-            card.destroy()
-        self.instance_cards = []
-        
-        def create_next_card(index=0):
-            if index >= total_instances:
-                # All cards created, schedule final UI update
-                self.after(100, lambda: self._continue_ui_setup(6, total_instances))
-                return
-                
-            instance = instances[index]
-            name = instance["name"]
-            status = instance["status"]
-            
-            print(f"[BensonApp] Creating card for {name} - Status: {status}")
-            
-            def do_create():
-                # Create card frame
-                card = self.ui_manager.create_instance_card(name, status)
-                self.instance_cards.append(card)
-                
-                # Update loading status
-                self.loading.update_status(f"Loading instance {index + 1}/{total_instances}: {name}")
-                
-                # Force immediate update of loading status
-                self.loading.window.update_idletasks()
-                
-                # Schedule next card creation with a small delay
-                self.after(100, lambda: create_next_card(index + 1))
-            
-            # Schedule card creation for next event loop
-            self.after(1, do_create)
-        
-        # Start creating cards
-        create_next_card()
 
     def on_card_selection_changed(self):
         """Called when a card's selection state changes"""

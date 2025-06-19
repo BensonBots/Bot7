@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - Fixed UI Manager
-All issues resolved: console resize, header text, search size, window controls
+BENSON v2.0 - Enhanced UI Manager with Separate Dialog Integration
+Safe window dragging without crashes and modern dialog system
 """
 
 import tkinter as tk
@@ -8,13 +8,16 @@ from tkinter import messagebox
 
 
 class UIManager:
-    """Fixed UI manager with all requested improvements"""
+    """Enhanced UI manager with safe draggable windows and modern dialogs"""
     
     def __init__(self, app_ref):
         self.app = app_ref
+        self.dragging = False
+        self.start_x = 0
+        self.start_y = 0
     
     def setup_header(self):
-        """Setup header with custom window controls and smaller search"""
+        """Setup header with safer custom window controls"""
         header = tk.Frame(self.app, bg="#0a0e16", height=70)
         header.pack(fill="x", padx=10, pady=(10, 0))
         header.pack_propagate(False)
@@ -83,14 +86,12 @@ class UIManager:
         )
         close_btn.pack(side="left")
         
-        # Hide default window controls
+        # SAFER: Only try to make draggable without overrideredirect for main window
         try:
-            self.app.overrideredirect(True)
-            # Make window draggable
-            self.make_draggable(header)
-        except:
-            # Fallback if override doesn't work
-            pass
+            # Make window draggable but keep default controls as fallback
+            self.make_draggable_safe(title_frame)
+        except Exception as e:
+            print(f"[UIManager] Could not setup dragging: {e}")
     
     def setup_search_bar(self, parent):
         """Setup smaller search bar"""
@@ -129,11 +130,11 @@ class UIManager:
         self.app.search_entry.bind("<FocusOut>", self.app.on_search_focus_out)
     
     def setup_controls(self):
-        """Setup control section with fixed instance counter"""
+        """Setup control section with enhanced buttons"""
         controls = tk.Frame(self.app, bg="#0a0e16")
         controls.pack(fill="x", padx=10, pady=10)
         
-        # Left side - instances header (just "Instances")
+        # Left side - instances header
         left_frame = tk.Frame(controls, bg="#0a0e16")
         left_frame.pack(side="left")
         
@@ -149,48 +150,85 @@ class UIManager:
         self.app.instances_header.pack(side="left")
         self.app.instances_header.bind("<Button-1>", lambda e: self.app.instance_ops.toggle_select_all())
         
-        # Center - Bulk operations
+        # Center - Enhanced bulk operations with hover effects
         bulk_frame = tk.Frame(controls, bg="#0a0e16")
         bulk_frame.pack(side="left", padx=(40, 0))
         
         buttons = [
-            ("➕ Create", "#00ff88", "#000000", self.create_instance_with_dialog),
+            ("➕ Create", "#00ff88", "#000000", self.create_instance_with_enhanced_dialog),
             ("📋 Clone", "#00d4ff", "#000000", self.app.instance_ops.clone_selected_instance),
             ("▶ Start All", "#00e676", "#000000", self.app.instance_ops.start_selected_instances),
             ("⏹ Stop All", "#ff6b6b", "#ffffff", self.app.instance_ops.stop_selected_instances)
         ]
         
         for text, bg, fg, command in buttons:
-            btn = tk.Button(
-                bulk_frame,
-                text=text,
-                bg=bg,
-                fg=fg,
-                font=("Segoe UI", 9, "bold"),
-                relief="flat",
-                bd=0,
-                padx=12,
-                pady=6,
-                cursor="hand2",
-                command=command
-            )
+            btn = self._create_enhanced_button(bulk_frame, text, bg, fg, command)
             btn.pack(side="left", padx=(0, 8))
         
-        # Right side - refresh button
-        refresh_btn = tk.Button(
-            controls,
-            text="⟳ Refresh",
-            bg="#1a1f2e",
-            fg="#00d4ff",
-            font=("Segoe UI", 10, "bold"),
-            relief="flat",
-            bd=0,
-            cursor="hand2",
-            padx=16,
-            pady=8,
-            command=self.app.instance_ops.refresh_instances
+        # Right side - enhanced refresh button
+        refresh_btn = self._create_enhanced_button(
+            controls, "⟳ Refresh", "#1a1f2e", "#00d4ff", 
+            self.app.instance_ops.refresh_instances, side="right"
         )
         refresh_btn.pack(side="right")
+    
+    def _create_enhanced_button(self, parent, text, bg, fg, command, side=None):
+        """Create a button with enhanced hover effects"""
+        btn = tk.Button(
+            parent,
+            text=text,
+            bg=bg,
+            fg=fg,
+            font=("Segoe UI", 9, "bold"),
+            relief="flat",
+            bd=0,
+            padx=12,
+            pady=6,
+            cursor="hand2",
+            command=command
+        )
+        
+        # Add hover effects
+        original_bg = bg
+        hover_bg = self._get_hover_color(bg)
+        
+        def on_enter(e):
+            btn.configure(bg=hover_bg, relief="raised", bd=1)
+        
+        def on_leave(e):
+            btn.configure(bg=original_bg, relief="flat", bd=0)
+        
+        def on_click(e):
+            btn.configure(bg=self._get_click_color(bg))
+            btn.after(100, lambda: btn.configure(bg=original_bg))
+        
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        btn.bind("<Button-1>", on_click)
+        
+        return btn
+    
+    def _get_hover_color(self, color):
+        """Get hover color for a given color"""
+        hover_map = {
+            "#00ff88": "#00ff99",
+            "#00d4ff": "#33ddff",
+            "#00e676": "#33ea88",
+            "#ff6b6b": "#ff8888",
+            "#1a1f2e": "#252a39"
+        }
+        return hover_map.get(color, color)
+    
+    def _get_click_color(self, color):
+        """Get click color for a given color"""
+        click_map = {
+            "#00ff88": "#00dd77",
+            "#00d4ff": "#00aacc",
+            "#00e676": "#00cc55",
+            "#ff6b6b": "#ff4444",
+            "#1a1f2e": "#0f141d"
+        }
+        return click_map.get(color, color)
     
     def setup_main_content(self):
         """Setup the main content area"""
@@ -225,36 +263,20 @@ class UIManager:
         )
         header_label.pack(side="left")
         
-        # Console buttons
-        clear_btn = tk.Button(
-            console_header,
-            text="🗑 Clear",
-            bg="#1a1f2e",
-            fg="#ff6b6b",
-            relief="flat",
-            bd=0,
-            font=("Segoe UI", 8, "bold"),
-            cursor="hand2",
-            padx=8,
-            pady=4,
-            command=self.app.clear_console
+        # Console buttons with hover effects
+        clear_btn = self._create_enhanced_button(
+            console_header, "🗑 Clear", "#1a1f2e", "#ff6b6b", 
+            self.app.clear_console
         )
+        clear_btn.configure(font=("Segoe UI", 8, "bold"), padx=8, pady=4)
         clear_btn.pack(side="right")
         
         # Resize handle
-        resize_btn = tk.Button(
-            console_header,
-            text="⇕",
-            bg="#1a1f2e",
-            fg="#8b949e",
-            relief="flat",
-            bd=0,
-            font=("Segoe UI", 8, "bold"),
-            cursor="sb_v_double_arrow",
-            padx=8,
-            pady=4,
-            command=self.toggle_console_size
+        resize_btn = self._create_enhanced_button(
+            console_header, "⇕", "#1a1f2e", "#8b949e", 
+            self.toggle_console_size
         )
+        resize_btn.configure(font=("Segoe UI", 8, "bold"), padx=8, pady=4, cursor="sb_v_double_arrow")
         resize_btn.pack(side="right", padx=(0, 5))
         
         # Console text container with initial height
@@ -297,135 +319,173 @@ class UIManager:
     # Window control methods
     def minimize_window(self):
         """Minimize the window"""
-        self.app.iconify()
+        try:
+            self.app.iconify()
+        except Exception as e:
+            print(f"[UIManager] Error minimizing: {e}")
     
     def close_window(self):
         """Close the window"""
-        self.app.destroy()
+        try:
+            self.app.destroy()
+        except Exception as e:
+            print(f"[UIManager] Error closing: {e}")
     
-    def make_draggable(self, widget):
-        """Make the window draggable by clicking on header"""
+    def make_draggable_safe(self, widget):
+        """Safer draggable implementation without overrideredirect"""
         def start_drag(event):
-            widget.start_x = event.x
-            widget.start_y = event.y
+            try:
+                self.dragging = True
+                self.start_x = event.x_root - self.app.winfo_x()
+                self.start_y = event.y_root - self.app.winfo_y()
+                widget.configure(cursor="fleur")  # Change cursor to indicate dragging
+            except Exception as e:
+                print(f"[UIManager] Error starting drag: {e}")
+                self.dragging = False
         
         def drag_window(event):
-            x = self.app.winfo_x() + (event.x - widget.start_x)
-            y = self.app.winfo_y() + (event.y - widget.start_y)
-            self.app.geometry(f"+{x}+{y}")
+            try:
+                if self.dragging:
+                    x = event.x_root - self.start_x
+                    y = event.y_root - self.start_y
+                    
+                    # Constrain to screen bounds
+                    screen_width = self.app.winfo_screenwidth()
+                    screen_height = self.app.winfo_screenheight()
+                    window_width = self.app.winfo_width()
+                    window_height = self.app.winfo_height()
+                    
+                    # Keep window on screen
+                    x = max(0, min(x, screen_width - window_width))
+                    y = max(0, min(y, screen_height - window_height))
+                    
+                    self.app.geometry(f"+{x}+{y}")
+            except Exception as e:
+                print(f"[UIManager] Error during drag: {e}")
+                self.dragging = False
         
-        widget.bind("<Button-1>", start_drag)
-        widget.bind("<B1-Motion>", drag_window)
+        def stop_drag(event):
+            try:
+                self.dragging = False
+                widget.configure(cursor="")  # Reset cursor
+            except Exception as e:
+                print(f"[UIManager] Error stopping drag: {e}")
+        
+        # Bind events with error handling
+        try:
+            widget.bind("<Button-1>", start_drag)
+            widget.bind("<B1-Motion>", drag_window)
+            widget.bind("<ButtonRelease-1>", stop_drag)
+            
+            # Also bind to the main window for safety
+            self.app.bind("<ButtonRelease-1>", stop_drag)
+        except Exception as e:
+            print(f"[UIManager] Error binding drag events: {e}")
     
     def toggle_console_size(self):
         """Toggle console between small and large size"""
-        if self.console_expanded:
-            # Shrink console
-            self.console_container.configure(height=120)
-            self.console_expanded = False
-        else:
-            # Expand console
-            self.console_container.configure(height=300)
-            self.console_expanded = True
+        try:
+            if self.console_expanded:
+                # Shrink console
+                self.console_container.configure(height=120)
+                self.console_expanded = False
+            else:
+                # Expand console
+                self.console_container.configure(height=300)
+                self.console_expanded = True
+            
+            # Force update
+            self.app.update_idletasks()
+        except Exception as e:
+            print(f"[UIManager] Error toggling console: {e}")
+    
+    def create_instance_with_enhanced_dialog(self):
+        """Create instance using the separate dialog file"""
+        try:
+            # Import the dialog
+            from gui.dialogs.create_instance_dialog import show_create_instance_dialog
+            
+            # Show dialog and get result
+            instance_name = show_create_instance_dialog(self.app, self.app)
+            
+            # If user provided a name, create the instance
+            if instance_name:
+                self.app.instance_ops.create_instance_with_name(instance_name)
+            else:
+                self.app.add_console_message("Instance creation cancelled")
+                
+        except ImportError as e:
+            print(f"[UIManager] Could not import create dialog: {e}")
+            # Fallback to simple dialog
+            self._create_instance_fallback()
+        except Exception as e:
+            print(f"[UIManager] Error with create dialog: {e}")
+            messagebox.showerror("Error", f"Could not create instance: {str(e)}")
+    
+    def _create_instance_fallback(self):
+        """Fallback simple dialog if the main one fails"""
+        from tkinter import simpledialog
         
-        # Force update
-        self.app.update_idletasks()
+        name = simpledialog.askstring(
+            "Create MEmu Instance", 
+            "Enter MEmu instance name:",
+            parent=self.app
+        )
+        
+        if name:
+            self.app.instance_ops.create_instance_with_name(name)
+        else:
+            self.app.add_console_message("Instance creation cancelled")
     
     def create_instance_with_dialog(self):
-        """Create instance with better dialog"""
-        # Create custom dialog
-        dialog = tk.Toplevel(self.app)
-        dialog.title("Create MEmu Instance")
-        dialog.geometry("400x200")
-        dialog.configure(bg="#1e2329")
-        dialog.transient(self.app)
-        dialog.grab_set()
-        
-        # Center dialog
-        dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() // 2) - (200)
-        y = (dialog.winfo_screenheight() // 2) - (100)
-        dialog.geometry(f"400x200+{x}+{y}")
-        
-        # Title
-        tk.Label(dialog, text="🆕 Create New Instance", bg="#1e2329", fg="#00d4ff",
-                font=("Segoe UI", 14, "bold")).pack(pady=20)
-        
-        # Input frame
-        input_frame = tk.Frame(dialog, bg="#1e2329")
-        input_frame.pack(pady=10)
-        
-        tk.Label(input_frame, text="Instance Name:", bg="#1e2329", fg="#ffffff",
-                font=("Segoe UI", 10)).pack(pady=(0, 5))
-        
-        name_var = tk.StringVar()
-        name_entry = tk.Entry(input_frame, textvariable=name_var, bg="#0a0e16", fg="#ffffff",
-                             font=("Segoe UI", 11), width=25, relief="solid", bd=1)
-        name_entry.pack(pady=(0, 10))
-        name_entry.focus()
-        
-        # Buttons
-        button_frame = tk.Frame(dialog, bg="#1e2329")
-        button_frame.pack(pady=20)
-        
-        def create_instance():
-            name = name_var.get().strip()
-            if name:
-                dialog.destroy()
-                # Call the actual creation method with the name
-                self.app.instance_ops.create_instance_with_name(name)
-            else:
-                messagebox.showerror("Error", "Please enter a valid instance name")
-        
-        def cancel():
-            dialog.destroy()
-        
-        tk.Button(button_frame, text="✓ Create", bg="#00ff88", fg="#000000",
-                 font=("Segoe UI", 10, "bold"), relief="flat", bd=0, padx=20, pady=8,
-                 cursor="hand2", command=create_instance).pack(side="left", padx=(0, 10))
-        
-        tk.Button(button_frame, text="✗ Cancel", bg="#ff6b6b", fg="#ffffff",
-                 font=("Segoe UI", 10, "bold"), relief="flat", bd=0, padx=20, pady=8,
-                 cursor="hand2", command=cancel).pack(side="left")
-        
-        # Enter key binding
-        dialog.bind('<Return>', lambda e: create_instance())
-        name_entry.bind('<Return>', lambda e: create_instance())
+        """Legacy method - redirects to enhanced dialog"""
+        self.create_instance_with_enhanced_dialog()
     
     def show_modules(self, instance_name):
         """Show modules window for an instance"""
-        self.app.add_console_message(f"Opening module configuration for: {instance_name}")
-        
-        from gui.dialogs.modules_window import ModulesWindow
-        ModulesWindow(self.app, instance_name, app_ref=self.app)
+        try:
+            self.app.add_console_message(f"Opening module configuration for: {instance_name}")
+            
+            from gui.dialogs.modules_window import ModulesWindow
+            ModulesWindow(self.app, instance_name, app_ref=self.app)
+        except Exception as e:
+            print(f"[UIManager] Error showing modules: {e}")
+            messagebox.showerror("Error", f"Could not open modules: {str(e)}")
 
     def create_instance_card(self, name, status):
-        """Create a new instance card"""
-        from gui.components.instance_card import InstanceCard
-        
-        # Create the card without immediate UI updates
-        card = InstanceCard(
-            self.app.instances_container,
-            name=name,
-            status=status,
-            cpu_usage=0,
-            memory_usage=0,
-            app_ref=self.app
-        )
-        
-        # Schedule UI updates for next event loop
-        def update_ui():
-            # Position all cards
-            self.app.reposition_all_cards()
+        """Create a new instance card with enhanced version"""
+        try:
+            from gui.components.instance_card import InstanceCard
             
-            # Force counter update
-            self.app.force_counter_update()
+            # Create the card without immediate UI updates
+            card = InstanceCard(
+                self.app.instances_container,
+                name=name,
+                status=status,
+                cpu_usage=0,
+                memory_usage=0,
+                app_ref=self.app
+            )
             
-            # Refresh modules when instances change
-            if hasattr(self.app, 'module_manager'):
-                self.app.module_manager.refresh_modules()
-        
-        # Schedule UI updates for next event loop
-        self.app.after(1, update_ui)
+            # Schedule UI updates for next event loop
+            def update_ui():
+                try:
+                    # Position all cards
+                    self.app.reposition_all_cards()
+                    
+                    # Force counter update
+                    self.app.force_counter_update()
+                    
+                    # Refresh modules when instances change
+                    if hasattr(self.app, 'module_manager'):
+                        self.app.module_manager.refresh_modules()
+                except Exception as e:
+                    print(f"[UIManager] Error updating UI: {e}")
             
-        return card
+            # Schedule UI updates for next event loop
+            self.app.after(1, update_ui)
+                
+            return card
+        except Exception as e:
+            print(f"[UIManager] Error creating instance card: {e}")
+            return None
