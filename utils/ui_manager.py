@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - Enhanced UI Manager with Separate Dialog Integration
-Safe window dragging without crashes and modern dialog system
+BENSON v2.0 - Fixed UI Manager with Correct InstanceCard Import
+Fixed import path and simplified card creation
 """
 
 import tkinter as tk
@@ -8,7 +8,7 @@ from tkinter import messagebox
 
 
 class UIManager:
-    """Enhanced UI manager with safe draggable windows and modern dialogs"""
+    """Fixed UI manager with correct InstanceCard import"""
     
     def __init__(self, app_ref):
         self.app = app_ref
@@ -86,9 +86,8 @@ class UIManager:
         )
         close_btn.pack(side="left")
         
-        # SAFER: Only try to make draggable without overrideredirect for main window
+        # Make window draggable
         try:
-            # Make window draggable but keep default controls as fallback
             self.make_draggable_safe(title_frame)
         except Exception as e:
             print(f"[UIManager] Could not setup dragging: {e}")
@@ -121,7 +120,7 @@ class UIManager:
             relief="flat",
             bd=0,
             insertbackground="#00d4ff",
-            width=20  # Smaller width
+            width=20
         )
         self.app.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 6), pady=6)
         self.app.search_entry.insert(0, "Search instances...")
@@ -338,7 +337,7 @@ class UIManager:
                 self.dragging = True
                 self.start_x = event.x_root - self.app.winfo_x()
                 self.start_y = event.y_root - self.app.winfo_y()
-                widget.configure(cursor="fleur")  # Change cursor to indicate dragging
+                widget.configure(cursor="fleur")
             except Exception as e:
                 print(f"[UIManager] Error starting drag: {e}")
                 self.dragging = False
@@ -367,17 +366,14 @@ class UIManager:
         def stop_drag(event):
             try:
                 self.dragging = False
-                widget.configure(cursor="")  # Reset cursor
+                widget.configure(cursor="")
             except Exception as e:
                 print(f"[UIManager] Error stopping drag: {e}")
         
-        # Bind events with error handling
         try:
             widget.bind("<Button-1>", start_drag)
             widget.bind("<B1-Motion>", drag_window)
             widget.bind("<ButtonRelease-1>", stop_drag)
-            
-            # Also bind to the main window for safety
             self.app.bind("<ButtonRelease-1>", stop_drag)
         except Exception as e:
             print(f"[UIManager] Error binding drag events: {e}")
@@ -386,15 +382,12 @@ class UIManager:
         """Toggle console between small and large size"""
         try:
             if self.console_expanded:
-                # Shrink console
                 self.console_container.configure(height=120)
                 self.console_expanded = False
             else:
-                # Expand console
                 self.console_container.configure(height=300)
                 self.console_expanded = True
             
-            # Force update
             self.app.update_idletasks()
         except Exception as e:
             print(f"[UIManager] Error toggling console: {e}")
@@ -402,13 +395,10 @@ class UIManager:
     def create_instance_with_enhanced_dialog(self):
         """Create instance using the separate dialog file"""
         try:
-            # Import the dialog
             from gui.dialogs.create_instance_dialog import show_create_instance_dialog
             
-            # Show dialog and get result
             instance_name = show_create_instance_dialog(self.app, self.app)
             
-            # If user provided a name, create the instance
             if instance_name:
                 self.app.instance_ops.create_instance_with_name(instance_name)
             else:
@@ -416,7 +406,6 @@ class UIManager:
                 
         except ImportError as e:
             print(f"[UIManager] Could not import create dialog: {e}")
-            # Fallback to simple dialog
             self._create_instance_fallback()
         except Exception as e:
             print(f"[UIManager] Error with create dialog: {e}")
@@ -453,11 +442,14 @@ class UIManager:
             messagebox.showerror("Error", f"Could not open modules: {str(e)}")
 
     def create_instance_card(self, name, status):
-        """Create a new instance card with enhanced version"""
+        """FIXED: Create a new instance card with correct import"""
         try:
-            from gui.components.instance_card import InstanceCard
+            # Import from the CORRECT file that contains InstanceCard
+            from core.components.instance_card import InstanceCard
             
-            # Create the card without immediate UI updates
+            print(f"[UIManager] Creating instance card for {name} with status {status}")
+            
+            # Create the card
             card = InstanceCard(
                 self.app.instances_container,
                 name=name,
@@ -467,25 +459,88 @@ class UIManager:
                 app_ref=self.app
             )
             
-            # Schedule UI updates for next event loop
-            def update_ui():
-                try:
-                    # Position all cards
-                    self.app.reposition_all_cards()
-                    
-                    # Force counter update
-                    self.app.force_counter_update()
-                    
-                    # Refresh modules when instances change
-                    if hasattr(self.app, 'module_manager'):
-                        self.app.module_manager.refresh_modules()
-                except Exception as e:
-                    print(f"[UIManager] Error updating UI: {e}")
-            
-            # Schedule UI updates for next event loop
-            self.app.after(1, update_ui)
-                
+            print(f"[UIManager] Successfully created instance card for {name}")
             return card
+            
+        except ImportError as e:
+            print(f"[UIManager] Import error for InstanceCard: {e}")
+            print("[UIManager] Trying to create a simple fallback card...")
+            
+            # Create a simple fallback card if import fails
+            return self._create_fallback_card(name, status)
+            
         except Exception as e:
             print(f"[UIManager] Error creating instance card: {e}")
+            return None
+
+    def _create_fallback_card(self, name, status):
+        """Create a simple fallback card if the main one fails"""
+        try:
+            print(f"[UIManager] Creating fallback card for {name}")
+            
+            # Simple card implementation
+            card = tk.Frame(self.app.instances_container, bg="#1e2329", relief="solid", bd=1)
+            card.configure(width=580, height=85)
+            card.pack_propagate(False)
+            
+            # Add basic properties
+            card.name = name
+            card.status = status
+            card.selected = False
+            card._destroyed = False
+            
+            # Create simple content
+            content_frame = tk.Frame(card, bg="#1e2329")
+            content_frame.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            # Name label
+            name_label = tk.Label(
+                content_frame,
+                text=name,
+                bg="#1e2329",
+                fg="#ffffff",
+                font=("Segoe UI", 13, "bold")
+            )
+            name_label.pack(side="left")
+            
+            # Status label
+            status_label = tk.Label(
+                content_frame,
+                text=f"Status: {status}",
+                bg="#1e2329",
+                fg="#8b949e",
+                font=("Segoe UI", 10)
+            )
+            status_label.pack(side="left", padx=(20, 0))
+            
+            # Simple methods
+            def toggle_checkbox():
+                card.selected = not card.selected
+                if card.selected:
+                    card.configure(bg="#00d4ff")
+                else:
+                    card.configure(bg="#1e2329")
+            
+            def update_status(new_status):
+                card.status = new_status
+                status_label.configure(text=f"Status: {new_status}")
+            
+            # Bind methods
+            card.toggle_checkbox = toggle_checkbox
+            card.update_status = update_status
+            
+            # Bind click event
+            def on_click(event):
+                toggle_checkbox()
+            
+            card.bind("<Button-1>", on_click)
+            content_frame.bind("<Button-1>", on_click)
+            name_label.bind("<Button-1>", on_click)
+            status_label.bind("<Button-1>", on_click)
+            
+            print(f"[UIManager] Created fallback card for {name}")
+            return card
+            
+        except Exception as e:
+            print(f"[UIManager] Error creating fallback card: {e}")
             return None

@@ -1,298 +1,432 @@
 """
-BENSON v2.0 - Deleting Instance Card Component
-Shows a card with deletion animation instead of loading overlay
+BENSON v2.0 - Clean Instance Card Component
+Fixed import issues and simplified for reliability
 """
 
 import tkinter as tk
+from tkinter import messagebox
+import json
+import threading
+import weakref
 
 
-class DeletingInstanceCard(tk.Frame):
-    """Card that shows deletion animation for instances being deleted"""
-    
-    def __init__(self, parent, instance_name, **kwargs):
+class InstanceCard(tk.Frame):
+    def __init__(self, parent, name, status="Offline", cpu_usage=0, memory_usage=0, app_ref=None, **kwargs):
         super().__init__(parent, **kwargs)
         
-        # Store data
-        self.instance_name = instance_name
-        self.animation_running = True
-        self.animation_step = 0
+        # Core instance data
+        self.name = name
+        self.status = status
+        self.cpu_usage = cpu_usage
+        self.memory_usage = memory_usage
+        self.selected = False
         self._destroyed = False
-        self.animation_id = None
+        self.app_ref = weakref.ref(app_ref) if app_ref else None
         
-        # Configure the main card frame
+        # Configure main frame
         self.configure(bg="#1e2329", relief="flat", bd=0, padx=3, pady=3)
         self.configure(width=580, height=85)
         self.pack_propagate(False)
         
-        # Setup UI
+        # Setup UI and events
         self._setup_ui()
+        self._setup_context_menu()
+        self._bind_events()
         
-        # Start deletion animation
-        self._start_deletion_animation()
+        # Set initial status correctly
+        self.update_status_display(status)
+        print(f"[InstanceCard] Created card for {name} with status: {status}")
     
     def _setup_ui(self):
-        """Setup the deleting card UI"""
-        # Main container with deletion border (red)
-        self.main_container = tk.Frame(self, bg="#ff6b6b", relief="solid", bd=2)
-        self.main_container.place(x=0, y=0, relwidth=1, relheight=1)
+        """Setup UI structure"""
+        # Main container with borders
+        self.main_container = tk.Frame(self, bg="#343a46", relief="solid", bd=1)
+        self.main_container.pack(fill="both", expand=True)
         
-        # Content frame
         self.content_frame = tk.Frame(self.main_container, bg="#1e2329")
-        self.content_frame.pack(fill="both", expand=True, padx=2, pady=2)
+        self.content_frame.pack(fill="both", expand=True, padx=1, pady=1)
         
         # Left side - info section
         left_frame = tk.Frame(self.content_frame, bg="#1e2329")
         left_frame.pack(side="left", fill="both", expand=True, padx=12, pady=10)
         
-        # Top row - deletion icon and name
+        # Top row - checkbox and name
         top_row = tk.Frame(left_frame, bg="#1e2329")
         top_row.pack(fill="x", pady=(0, 4))
         
-        # Animated deletion icon
-        self.deletion_icon = tk.Label(
-            top_row,
-            text="🗑",
-            bg="#1e2329",
-            fg="#ff6b6b",
-            font=("Segoe UI", 11)
-        )
-        self.deletion_icon.pack(side="left", padx=(0, 12))
+        self.selected_var = tk.BooleanVar()
+        self.checkbox = tk.Label(top_row, text="☐", bg="#1e2329", fg="#00d4ff", 
+                                font=("Segoe UI", 11), cursor="hand2")
+        self.checkbox.pack(side="left", padx=(0, 12))
         
-        # Instance name (grayed out)
-        self.name_label = tk.Label(
-            top_row,
-            text=self.instance_name,
-            bg="#1e2329",
-            fg="#8b949e",  # Grayed out
-            font=("Segoe UI", 13, "bold"),
-            anchor="w"
-        )
+        self.name_label = tk.Label(top_row, text=self.name, bg="#1e2329", fg="#ffffff",
+                                  font=("Segoe UI", 13, "bold"), anchor="w")
         self.name_label.pack(side="left", fill="x", expand=True)
         
         # Bottom row - status
         bottom_row = tk.Frame(left_frame, bg="#1e2329")
         bottom_row.pack(fill="x")
         
-        # Status icon
-        self.status_icon = tk.Label(
-            bottom_row,
-            text="●",
-            bg="#1e2329",
-            fg="#ff6b6b",
-            font=("Segoe UI", 10)
-        )
+        self.status_icon = tk.Label(bottom_row, text=self._get_status_icon(self.status),
+                                   bg="#1e2329", font=("Segoe UI", 10))
         self.status_icon.pack(side="left")
         
-        # Status text
-        self.status_text = tk.Label(
-            bottom_row,
-            text="Deleting...",
-            bg="#1e2329",
-            fg="#ff6b6b",
-            font=("Segoe UI", 10),
-            anchor="w"
-        )
+        self.status_text = tk.Label(bottom_row, text=self.status, bg="#1e2329",
+                                   font=("Segoe UI", 10), anchor="w")
         self.status_text.pack(side="left", padx=(8, 0))
         
-        # Right side - deletion progress
-        self._setup_deletion_section()
+        # Right side - buttons
+        self._setup_buttons()
     
-    def _setup_deletion_section(self):
-        """Setup deletion progress section"""
-        deletion_frame = tk.Frame(self.content_frame, bg="#1e2329")
-        deletion_frame.pack(side="right", padx=12, pady=10)
+    def _setup_buttons(self):
+        """Setup action buttons"""
+        button_frame = tk.Frame(self.content_frame, bg="#1e2329")
+        button_frame.pack(side="right", padx=12, pady=10)
         
-        # Progress dots (deletion style)
-        self.progress_frame = tk.Frame(deletion_frame, bg="#1e2329")
-        self.progress_frame.pack()
-        
-        self.progress_label = tk.Label(
-            self.progress_frame,
-            text="●●●●●",
-            bg="#1e2329",
-            fg="#ff6b6b",
-            font=("Segoe UI", 12),
-            width=8
+        # Context menu button
+        self.context_btn = tk.Button(
+            button_frame, 
+            text="⋮", 
+            bg="#404040", 
+            fg="#ffffff", 
+            relief="flat", 
+            bd=0,
+            font=("Segoe UI", 12, "bold"), 
+            cursor="hand2", 
+            width=2,
+            command=self._safe_show_context_menu
         )
-        self.progress_label.pack(pady=(5, 0))
+        self.context_btn.pack(side="right", padx=(0, 6))
         
-        # Status detail
-        self.detail_label = tk.Label(
-            deletion_frame,
-            text="Removing files...",
-            bg="#1e2329",
-            fg="#8b949e",
-            font=("Segoe UI", 8)
+        # Modules button
+        self.modules_btn = tk.Button(
+            button_frame, 
+            text="⚙ Modules", 
+            bg="#2196f3", 
+            fg="#ffffff", 
+            relief="flat", 
+            bd=0,
+            font=("Segoe UI", 9, "bold"), 
+            cursor="hand2", 
+            padx=10, 
+            pady=6,
+            command=self._safe_show_modules
         )
-        self.detail_label.pack(pady=(5, 0))
-    
-    def _start_deletion_animation(self):
-        """Start deletion animation loop"""
-        if not self.animation_running or self._destroyed:
-            return
+        self.modules_btn.pack(side="right", padx=(6, 0))
         
-        try:
-            if not self.winfo_exists():
-                return
-            
-            # Update deletion animation
-            self._update_deletion_animation()
-            
-            # Schedule next update
-            self.animation_id = self.after(350, self._start_deletion_animation)
-            
-        except (tk.TclError, AttributeError):
-            self.animation_running = False
-    
-    def _update_deletion_animation(self):
-        """Update deletion animation elements"""
-        try:
-            if self._destroyed or not self.animation_running:
-                return
-            
-            # Deletion progress (shrinking dots)
-            patterns = ["●●●●●", "○●●●●", "○○●●●", "○○○●●", "○○○○●", "○○○○○"]
-            pattern = patterns[self.animation_step % len(patterns)]
-            self.progress_label.configure(text=pattern)
-            
-            # Update deletion icon
-            icons = ["🗑", "🔥", "💥", "❌"]
-            icon = icons[(self.animation_step // 2) % len(icons)]
-            self.deletion_icon.configure(text=icon)
-            
-            # Update border color (pulsing red)
-            border_colors = ["#ff6b6b", "#ff4444", "#ff8888"]
-            border_color = border_colors[self.animation_step % len(border_colors)]
-            self.main_container.configure(bg=border_color)
-            
-            # Update status messages
-            messages = [
-                "Deleting...",
-                "Stopping instance...",
-                "Removing files...",
-                "Cleaning up...",
-                "Almost done..."
-            ]
-            
-            details = [
-                "Removing files...",
-                "Stopping processes...",
-                "Clearing cache...",
-                "Updating registry...",
-                "Finalizing..."
-            ]
-            
-            msg_index = (self.animation_step // 3) % len(messages)
-            self.status_text.configure(text=messages[msg_index])
-            self.detail_label.configure(text=details[msg_index])
-            
-            self.animation_step += 1
-            
-        except (tk.TclError, AttributeError):
-            self.animation_running = False
-    
-    def show_success(self):
-        """Show deletion success state"""
-        if self._destroyed:
-            return
+        # Start/Stop button with correct initial state
+        if self.status == "Running":
+            initial_text = "⏹ Stop"
+            initial_bg = "#ff6b6b"
+        else:
+            initial_text = "▶ Start"
+            initial_bg = "#00e676"
         
-        try:
-            # Stop animations
-            self.animation_running = False
-            if self.animation_id:
-                self.after_cancel(self.animation_id)
-            
-            # Show success state
-            self.main_container.configure(bg="#666666")
-            self.deletion_icon.configure(text="✓", fg="#00ff88")
-            self.status_icon.configure(text="✓", fg="#00ff88")
-            self.status_text.configure(text="Deleted successfully!", fg="#00ff88")
-            self.progress_label.configure(text="○○○○○", fg="#666666")
-            self.detail_label.configure(text="Instance removed")
-            
-            # Fade out after success
-            self.after(1000, self._fade_out)
-            
-        except (tk.TclError, AttributeError):
-            pass
+        self.start_btn = tk.Button(
+            button_frame, 
+            text=initial_text, 
+            bg=initial_bg, 
+            fg="#ffffff", 
+            relief="flat", 
+            bd=0,
+            font=("Segoe UI", 9, "bold"), 
+            cursor="hand2", 
+            padx=12, 
+            pady=6,
+            command=self._safe_toggle_instance
+        )
+        self.start_btn.pack(side="right", padx=(6, 0))
+        
+        print(f"[InstanceCard] {self.name} button initialized: {initial_text} (status: {self.status})")
+        
+        # Add simple hover effects
+        self._add_hover_effects()
     
-    def show_error(self, error_message="Deletion failed"):
-        """Show deletion error state"""
-        if self._destroyed:
-            return
+    def _add_hover_effects(self):
+        """Add simple hover effects"""
+        buttons = [
+            (self.context_btn, "#404040", "#555555"),
+            (self.modules_btn, "#2196f3", "#1976d2"),
+            (self.start_btn, None, None)  # Dynamic
+        ]
         
-        try:
-            # Stop animations
-            self.animation_running = False
-            if self.animation_id:
-                self.after_cancel(self.animation_id)
-            
-            # Show error state
-            self.main_container.configure(bg="#ff3333")
-            self.deletion_icon.configure(text="⚠", fg="#ffff00")
-            self.status_icon.configure(text="⚠", fg="#ffff00")
-            self.status_text.configure(text="Deletion failed", fg="#ffff00")
-            self.progress_label.configure(text="✗✗✗✗✗", fg="#ffff00")
-            
-            # Truncate long error messages
-            display_message = error_message[:30] + "..." if len(error_message) > 30 else error_message
-            self.detail_label.configure(text=display_message)
-            
-            # Keep error visible longer
-            self.after(5000, self._fade_out)
-            
-        except (tk.TclError, AttributeError):
-            pass
+        for button, normal_color, hover_color in buttons:
+            if button == self.start_btn:
+                self._add_start_button_hover()
+            else:
+                self._add_button_hover(button, normal_color, hover_color)
     
-    def _fade_out(self):
-        """Fade out animation before removal"""
-        if self._destroyed:
-            return
+    def _add_button_hover(self, button, normal_color, hover_color):
+        """Add hover effect to button"""
+        def on_enter(e):
+            if not self._destroyed:
+                try:
+                    button.configure(bg=hover_color)
+                except tk.TclError:
+                    pass
         
-        # Simple fade by changing opacity-like effect
-        fade_colors = ["#444444", "#333333", "#222222", "#111111", "#000000"]
+        def on_leave(e):
+            if not self._destroyed:
+                try:
+                    button.configure(bg=normal_color)
+                except tk.TclError:
+                    pass
         
-        def fade_step(step=0):
-            if self._destroyed or step >= len(fade_colors):
-                self._safe_destroy()
-                return
-            
+        button.bind("<Enter>", on_enter)
+        button.bind("<Leave>", on_leave)
+    
+    def _add_start_button_hover(self):
+        """Add hover effects for start/stop button"""
+        def on_enter(e):
+            if not self._destroyed:
+                try:
+                    current_text = self.start_btn.cget("text")
+                    if "Start" in current_text:
+                        self.start_btn.configure(bg="#00ff88")
+                    else:
+                        self.start_btn.configure(bg="#ff8a80")
+                except tk.TclError:
+                    pass
+        
+        def on_leave(e):
+            if not self._destroyed:
+                try:
+                    current_text = self.start_btn.cget("text")
+                    if "Start" in current_text:
+                        self.start_btn.configure(bg="#00e676")
+                    else:
+                        self.start_btn.configure(bg="#ff6b6b")
+                except tk.TclError:
+                    pass
+        
+        self.start_btn.bind("<Enter>", on_enter)
+        self.start_btn.bind("<Leave>", on_leave)
+    
+    def _setup_context_menu(self):
+        """Setup context menu"""
+        self.context_menu = tk.Menu(self, tearoff=0, bg="#2a2a2a", fg="white", bd=0)
+        context_items = [
+            ("🎯 Start Instance", self._safe_start_instance),
+            ("⏹ Stop Instance", self._safe_stop_instance),
+            ("🔄 Restart Instance", self._safe_restart_instance),
+            None,
+            ("📋 View Logs", self._safe_view_logs),
+            ("💾 Export Config", self._safe_export_config),
+            ("🗑 Delete Instance", self._safe_delete_instance)
+        ]
+        
+        for item in context_items:
+            if item is None:
+                self.context_menu.add_separator()
+            else:
+                self.context_menu.add_command(label=item[0], command=item[1])
+    
+    def _bind_events(self):
+        """Bind essential events"""
+        clickable = [self, self.main_container, self.content_frame, self.checkbox, self.name_label]
+        for element in clickable:
+            element.bind("<Button-1>", self._on_click)
+            element.bind("<Button-3>", self._on_right_click)
+    
+    def _on_click(self, event):
+        if not self._destroyed:
+            self.toggle_checkbox()
+    
+    def _on_right_click(self, event):
+        if not self._destroyed:
             try:
-                self.main_container.configure(bg=fade_colors[step])
-                # Fade text colors too
-                fade_text_color = fade_colors[step]
-                for widget in [self.name_label, self.status_text, self.detail_label]:
-                    widget.configure(fg=fade_text_color)
-                
-                self.after(150, lambda: fade_step(step + 1))
-            except (tk.TclError, AttributeError):
-                self._safe_destroy()
-        
-        fade_step()
+                self.context_menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                self.context_menu.grab_release()
     
-    def _safe_destroy(self):
-        """Safe destroy with cleanup"""
+    def toggle_checkbox(self):
+        """Toggle selection state"""
+        if self._destroyed:
+            return
+        
+        self.selected = not self.selected
+        self.selected_var.set(self.selected)
+        
+        if self.selected:
+            self.checkbox.configure(text="☑", fg="#00ff88")
+            self.main_container.configure(bg="#00d4ff")
+        else:
+            self.checkbox.configure(text="☐", fg="#00d4ff")
+            self.main_container.configure(bg="#343a46")
+        
+        # Notify parent
+        app = self._get_app_ref()
+        if app and hasattr(app, 'on_card_selection_changed'):
+            app.on_card_selection_changed()
+    
+    def update_status(self, new_status):
+        """Update instance status"""
+        if self._destroyed:
+            return
+        
+        old_status = self.status
+        self.status = new_status
+        
+        # Update visual display
+        self.update_status_display(new_status)
+        
+        # Update start button
+        if new_status == "Running":
+            self.start_btn.configure(text="⏹ Stop", bg="#ff6b6b")
+        elif new_status in ["Starting", "Stopping"]:
+            self.start_btn.configure(text="⏸ Wait", bg="#ffd93d")
+        else:
+            self.start_btn.configure(text="▶ Start", bg="#00e676")
+        
+        if old_status != new_status:
+            print(f"[InstanceCard] {self.name} status updated: {old_status} -> {new_status}")
+    
+    def update_status_display(self, new_status):
+        """Update visual status display"""
+        if self._destroyed:
+            return
+        
+        colors = {
+            "Running": "#00ff88",
+            "Stopped": "#8b949e",
+            "Offline": "#8b949e",
+            "Starting": "#ffd93d",
+            "Stopping": "#ff9800",
+            "Error": "#ff6b6b"
+        }
+        
+        color = colors.get(new_status, "#8b949e")
+        icon = self._get_status_icon(new_status)
+        
+        self.status_icon.configure(text=icon, fg=color)
+        self.status_text.configure(text=new_status, fg=color)
+        
+        if not self.selected:
+            border_colors = {
+                "Running": "#00ff88",
+                "Error": "#ff6b6b", 
+                "Starting": "#ffd93d",
+                "Stopping": "#ffd93d"
+            }
+            border_color = border_colors.get(new_status, "#343a46")
+            self.main_container.configure(bg=border_color)
+    
+    def _get_app_ref(self):
+        return self.app_ref() if self.app_ref else None
+    
+    def _safe_toggle_instance(self):
+        if self.status == "Running":
+            self._safe_stop_instance()
+        else:
+            self._safe_start_instance()
+    
+    def _safe_start_instance(self):
+        app = self._get_app_ref()
+        if app:
+            threading.Thread(target=lambda: app.start_instance(self.name), daemon=True).start()
+    
+    def _safe_stop_instance(self):
+        app = self._get_app_ref()
+        if app:
+            threading.Thread(target=lambda: app.stop_instance(self.name), daemon=True).start()
+    
+    def _safe_restart_instance(self):
+        self._safe_stop_instance()
+        self.after(2500, self._safe_start_instance)
+    
+    def _safe_show_modules(self):
+        app = self._get_app_ref()
+        if app:
+            app.show_modules(self.name)
+    
+    def _safe_view_logs(self):
         try:
-            self.destroy()
-        except:
-            pass
+            log_window = tk.Toplevel(self)
+            log_window.title(f"{self.name} - Logs")
+            log_window.geometry("600x400")
+            log_window.configure(bg="#1e2329")
+            log_window.transient(self)
+            
+            log_window.update_idletasks()
+            x = (log_window.winfo_screenwidth() // 2) - (300)
+            y = (log_window.winfo_screenheight() // 2) - (200)
+            log_window.geometry(f"600x400+{x}+{y}")
+            
+            tk.Label(log_window, text=f"📋 {self.name} - Activity Logs", 
+                    bg="#1e2329", fg="#00d4ff", font=("Segoe UI", 14, "bold")).pack(pady=10)
+            
+            log_frame = tk.Frame(log_window, bg="#161b22", relief="solid", bd=1)
+            log_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+            
+            log_text = tk.Text(log_frame, bg="#0a0e16", fg="#58a6ff", font=("Consolas", 9),
+                              relief="flat", bd=0, wrap="word", state="disabled", padx=8, pady=8)
+            log_text.pack(fill="both", expand=True)
+            
+            sample_logs = [
+                f"[INFO] Instance {self.name} initialized successfully",
+                "[DEBUG] Memory allocation: 2048MB", 
+                "[INFO] Network interface configured",
+                "[DEBUG] Graphics driver loaded",
+                "[INFO] Android system booted",
+                f"[INFO] {self.name} ready for user interaction",
+                f"[DEBUG] Current status: {self.status}",
+                "[INFO] All systems operational"
+            ]
+            
+            log_text.configure(state="normal")
+            for log_entry in sample_logs:
+                timestamp = "[12:34:56]"
+                log_text.insert("end", f"{timestamp} {log_entry}\n")
+            log_text.configure(state="disabled")
+            
+            tk.Button(log_window, text="Close", bg="#ff6b6b", fg="#ffffff", 
+                     font=("Segoe UI", 10, "bold"), relief="flat", bd=0, padx=20, pady=8,
+                     cursor="hand2", command=log_window.destroy).pack(pady=10)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not open log viewer: {str(e)}")
+    
+    def _safe_export_config(self):
+        try:
+            config = {
+                "name": self.name, 
+                "status": self.status, 
+                "cpu": self.cpu_usage, 
+                "memory": self.memory_usage
+            }
+            filename = f"{self.name}_config.json"
+            with open(filename, 'w') as f:
+                json.dump(config, f, indent=2)
+            messagebox.showinfo("Export Complete", f"Configuration exported to {filename}")
+        except Exception as e:
+            messagebox.showerror("Export Failed", f"Failed to export config: {str(e)}")
+    
+    def _safe_delete_instance(self):
+        app = self._get_app_ref()
+        if app and hasattr(app, 'instance_ops'):
+            app.instance_ops.delete_instance_card_with_animation(self)
+    
+    def _safe_show_context_menu(self):
+        try:
+            x = self.winfo_rootx() + self.winfo_width() - 30
+            y = self.winfo_rooty() + 30
+            self.context_menu.tk_popup(x, y)
+        finally:
+            self.context_menu.grab_release()
+    
+    def _get_status_icon(self, status):
+        icons = {
+            "Running": "✓",
+            "Stopped": "○",
+            "Offline": "○",
+            "Starting": "⚡",
+            "Stopping": "⏹",
+            "Error": "⚠",
+            "Connecting": "↻"
+        }
+        return icons.get(status, "○")
     
     def destroy(self):
-        """Clean destroy with animation cleanup"""
         self._destroyed = True
-        self.animation_running = False
-        
-        # Cancel scheduled animation
-        if self.animation_id:
-            try:
-                self.after_cancel(self.animation_id)
-            except:
-                pass
-        
+        self.app_ref = None
         super().destroy()
-
-
-# Helper function to create deleting card
-def create_deleting_instance_card(parent, instance_name):
-    """Create a deleting instance card"""
-    return DeletingInstanceCard(parent, instance_name)

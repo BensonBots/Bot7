@@ -1,12 +1,13 @@
 """
-BENSON v2.0 - Instance Manager (COMPLETE WITH ALL FEATURES)
-Includes timeout safeguards, improved subprocess handling, and create/delete functionality
+BENSON v2.0 - FIXED Instance Manager
+Fixed instance creation naming and improved error handling
 """
 
 import subprocess
 import json
 import time
 import os
+import re
 
 
 class InstanceManager:
@@ -273,22 +274,46 @@ class InstanceManager:
             print(f"[InstanceManager] ERROR stopping '{name}': {e}")
             return False
 
+    def _sanitize_instance_name(self, name):
+        """FIXED: Sanitize instance name for MEmu compatibility"""
+        if not name:
+            return "Instance"
+        
+        # Remove spaces and special characters that MEmu doesn't handle well
+        sanitized = re.sub(r'[^\w\-_]', '', name.strip())
+        
+        # Replace spaces with underscores
+        sanitized = re.sub(r'\s+', '_', sanitized)
+        
+        # Ensure it's not empty
+        if not sanitized:
+            sanitized = "Instance"
+        
+        # Limit length
+        if len(sanitized) > 20:
+            sanitized = sanitized[:20]
+        
+        print(f"[InstanceManager] Sanitized name '{name}' -> '{sanitized}'")
+        return sanitized
+
     def create_instance_with_name(self, name):
-        """FIXED: Create a new MEmu instance with the specified name"""
+        """FIXED: Create a new MEmu instance with sanitized name"""
         try:
-            print(f"[InstanceManager] Creating new instance: {name}")
+            # Sanitize the name first
+            sanitized_name = self._sanitize_instance_name(name)
+            print(f"[InstanceManager] Creating new instance: {name} (sanitized: {sanitized_name})")
             
             # Check if MEmu is available first
             if not self._is_memu_available():
                 print(f"[InstanceManager] MEmu is not available")
                 return False
             
-            # First, create the instance with MEmu command
-            print(f"[InstanceManager] Executing: {self.MEMUC_PATH} create {name}")
+            # Create the instance with sanitized name
+            print(f"[InstanceManager] Executing: {self.MEMUC_PATH} create {sanitized_name}")
             
             result = subprocess.run(
-                [self.MEMUC_PATH, "create", name],
-                capture_output=True, text=True, timeout=60  # Increased timeout
+                [self.MEMUC_PATH, "create", sanitized_name],
+                capture_output=True, text=True, timeout=60
             )
             
             print(f"[InstanceManager] Create command return code: {result.returncode}")
@@ -296,13 +321,13 @@ class InstanceManager:
             print(f"[InstanceManager] Create command stderr: {result.stderr}")
             
             if result.returncode != 0:
-                print(f"[InstanceManager] Failed to create instance {name}")
+                print(f"[InstanceManager] Failed to create instance {sanitized_name}")
                 print(f"[InstanceManager] Error: {result.stderr}")
                 return False
             
-            print(f"[InstanceManager] Instance {name} created successfully")
+            print(f"[InstanceManager] Instance {sanitized_name} created successfully")
             
-            # Wait a moment for MEmu to register the new instance
+            # Wait for MEmu to register the new instance
             print(f"[InstanceManager] Waiting for MEmu to register new instance...")
             time.sleep(3)
             
@@ -314,25 +339,47 @@ class InstanceManager:
             
             print(f"[InstanceManager] Instance count: {old_count} -> {new_count}")
             
-            # Find the newly created instance to get its index
-            new_instance = next((i for i in self.instances if i["name"] == name), None)
+            # Find the newly created instance - check both original and sanitized names
+            new_instance = None
+            
+            # First try to find by sanitized name
+            new_instance = next((i for i in self.instances if i["name"] == sanitized_name), None)
+            
+            # If not found, look for the most recently created instance
+            if not new_instance and new_count > old_count:
+                # Get all instances and find the one with highest index
+                max_index = max((i["index"] for i in self.instances), default=-1)
+                new_instance = next((i for i in self.instances if i["index"] == max_index), None)
+                
+                if new_instance:
+                    print(f"[InstanceManager] Found new instance by index: {new_instance}")
+            
             if not new_instance:
-                print(f"[InstanceManager] Warning: Could not find newly created instance {name}")
+                print(f"[InstanceManager] Warning: Could not find newly created instance")
                 # Still consider it successful since MEmu said it worked
                 return True
             
             print(f"[InstanceManager] Found new instance: {new_instance}")
             
+            # If the actual name differs from what we wanted, try to rename it
+            if new_instance["name"] != name and name != sanitized_name:
+                print(f"[InstanceManager] Attempting to rename to original name: {name}")
+                rename_success = self.rename_instance(new_instance["name"], name)
+                if rename_success:
+                    print(f"[InstanceManager] Successfully renamed to {name}")
+                else:
+                    print(f"[InstanceManager] Rename failed, keeping name: {new_instance['name']}")
+            
             # Apply optimization settings to the new instance
             try:
                 print(f"[InstanceManager] Applying optimization settings...")
-                self.optimize_instance_with_settings(name)
+                self.optimize_instance_with_settings(new_instance["name"])
                 print(f"[InstanceManager] Optimization completed")
             except Exception as e:
-                print(f"[InstanceManager] Warning: Could not optimize new instance {name}: {e}")
+                print(f"[InstanceManager] Warning: Could not optimize new instance: {e}")
                 # Don't fail creation if optimization fails
             
-            print(f"[InstanceManager] Successfully created and configured instance: {name}")
+            print(f"[InstanceManager] Successfully created and configured instance")
             return True
             
         except subprocess.TimeoutExpired:
@@ -396,12 +443,14 @@ class InstanceManager:
                 print(f"[InstanceManager] Could not find source instance '{source_name}' to clone.")
                 return False
 
+            # Sanitize the new name
+            sanitized_new_name = self._sanitize_instance_name(new_name)
             source_index = source_instance["index"]
-            print(f"[InstanceManager] Cloning instance '{source_name}' (index {source_index}) to '{new_name}'...")
+            print(f"[InstanceManager] Cloning instance '{source_name}' (index {source_index}) to '{sanitized_new_name}'...")
             
             # MEmu clone command
             result = subprocess.run(
-                [self.MEMUC_PATH, "clone", "-i", str(source_index), "-n", new_name],
+                [self.MEMUC_PATH, "clone", "-i", str(source_index), "-n", sanitized_new_name],
                 capture_output=True, text=True, timeout=90  # Cloning takes longer
             )
             
@@ -410,7 +459,7 @@ class InstanceManager:
             print(f"[InstanceManager] Clone command stderr: {result.stderr}")
 
             if result.returncode == 0:
-                print(f"[InstanceManager] Instance '{new_name}' cloned successfully from '{source_name}'.")
+                print(f"[InstanceManager] Instance '{sanitized_new_name}' cloned successfully from '{source_name}'.")
                 
                 # Wait for MEmu to register the cloned instance
                 time.sleep(3)
@@ -418,7 +467,7 @@ class InstanceManager:
                 
                 return True
             else:
-                print(f"[InstanceManager] Failed to clone '{source_name}' to '{new_name}': {result.stderr}")
+                print(f"[InstanceManager] Failed to clone '{source_name}' to '{sanitized_new_name}': {result.stderr}")
                 return False
                 
         except subprocess.TimeoutExpired:
@@ -436,12 +485,14 @@ class InstanceManager:
                 print(f"[InstanceManager] Could not find instance '{old_name}' to rename.")
                 return False
 
+            # Sanitize the new name
+            sanitized_new_name = self._sanitize_instance_name(new_name)
             index = instance["index"]
-            print(f"[InstanceManager] Renaming instance '{old_name}' (index {index}) to '{new_name}'...")
+            print(f"[InstanceManager] Renaming instance '{old_name}' (index {index}) to '{sanitized_new_name}'...")
             
             # MEmu rename command
             result = subprocess.run(
-                [self.MEMUC_PATH, "rename", "-i", str(index), "-n", new_name],
+                [self.MEMUC_PATH, "rename", "-i", str(index), "-n", sanitized_new_name],
                 capture_output=True, text=True, timeout=30
             )
             
@@ -450,14 +501,14 @@ class InstanceManager:
             print(f"[InstanceManager] Rename command stderr: {result.stderr}")
 
             if result.returncode == 0:
-                print(f"[InstanceManager] Instance renamed from '{old_name}' to '{new_name}' successfully.")
+                print(f"[InstanceManager] Instance renamed from '{old_name}' to '{sanitized_new_name}' successfully.")
                 
                 # Update our local instance data
-                instance["name"] = new_name
+                instance["name"] = sanitized_new_name
                 
                 return True
             else:
-                print(f"[InstanceManager] Failed to rename '{old_name}' to '{new_name}': {result.stderr}")
+                print(f"[InstanceManager] Failed to rename '{old_name}' to '{sanitized_new_name}': {result.stderr}")
                 return False
                 
         except subprocess.TimeoutExpired:
