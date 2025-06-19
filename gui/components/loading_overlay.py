@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - Fixed Loading Overlay Component
-Fixed animation freezing and timing issues
+BENSON v2.0 - FIXED Loading Overlay Component
+Fixed animation freezing and timing issues with single animation scheduler
 """
 
 import tkinter as tk
@@ -17,13 +17,13 @@ class LoadingOverlay:
         self.window.overrideredirect(True)  # Remove window decorations
         self.window.attributes('-topmost', True)  # Keep on top
         
-        # FIXED: Position relative to parent window, not screen center
+        # Position relative to parent window
         window_width = 260
         window_height = 180
         
         # Get parent position with error handling
         try:
-            parent.update_idletasks()  # Ensure parent geometry is current
+            parent.update_idletasks()
             parent_x = parent.winfo_x()
             parent_y = parent.winfo_y()
             parent_width = parent.winfo_width()
@@ -32,9 +32,6 @@ class LoadingOverlay:
             # Center on parent window
             x = parent_x + (parent_width - window_width) // 2
             y = parent_y + (parent_height - window_height) // 2
-            
-            print(f"[LoadingOverlay] Parent at: {parent_x}, {parent_y}")
-            print(f"[LoadingOverlay] Positioning loading at: {x}, {y}")
             
         except Exception as e:
             print(f"[LoadingOverlay] Error getting parent position: {e}")
@@ -45,19 +42,26 @@ class LoadingOverlay:
             y = (screen_height - window_height) // 2
         
         self.window.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        
-        # Configure window background
         self.window.configure(bg="#1e2329")
         
-        # FIXED: Simple animation state
+        # FIXED: Single animation control
         self.animation_running = True
         self.animation_step = 0
+        self.animation_id = None
         
-        # Main container (full window)
+        # Setup UI
+        self._setup_ui()
+        
+        # FIXED: Start single animation loop
+        self._start_single_animation()
+    
+    def _setup_ui(self):
+        """Setup UI components"""
+        # Main container
         self.overlay = tk.Frame(self.window, bg="#1e2329")
         self.overlay.pack(fill="both", expand=True)
         
-        # Content frame with proper padding
+        # Content frame
         content_frame = tk.Frame(self.overlay, bg="#1e2329")
         content_frame.pack(expand=True)
         
@@ -91,7 +95,7 @@ class LoadingOverlay:
         )
         self.status_label.pack(pady=(0, 15))
         
-        # FIXED: Progress with proper width
+        # Progress
         self.progress_frame = tk.Frame(content_frame, bg="#1e2329")
         self.progress_frame.pack()
         
@@ -101,97 +105,78 @@ class LoadingOverlay:
             bg="#1e2329",
             fg="#00d4ff",
             font=("Segoe UI", 8),
-            width=10  # FIXED: Ensure enough width
+            width=10
         )
         self.progress_label.pack()
-        
-        # Start simple animation immediately
-        self._update_animation()
-        
-        # Ensure window is properly sized
-        self.window.update_idletasks()
-        
-        # FIXED: Verify position after creation
-        self.window.after(100, lambda: self._verify_position(x, y))
-        
-        # FIXED: Single animation scheduler
-        self._schedule_animation_updates()
     
-    def _verify_position(self, expected_x, expected_y):
-        """Verify and correct position if needed"""
-        try:
-            current_x = self.window.winfo_x()
-            current_y = self.window.winfo_y()
-            
-            # If position is wrong, correct it
-            if abs(current_x - expected_x) > 50 or abs(current_y - expected_y) > 50:
-                print(f"[LoadingOverlay] Correcting position from {current_x},{current_y} to {expected_x},{expected_y}")
-                self.window.geometry(f"+{expected_x}+{expected_y}")
-                self.window.update()
-                
-        except Exception as e:
-            print(f"[LoadingOverlay] Position verification error: {e}")
-    
-    def _schedule_animation_updates(self):
-        """FIXED: Single animation scheduler to prevent conflicts"""
+    def _start_single_animation(self):
+        """FIXED: Start single animation loop without conflicts"""
         if not self.animation_running:
             return
-            
+        
         try:
-            if self.window.winfo_exists():
-                self._update_animation()
-                # Schedule next update
-                self.window.after(200, self._schedule_animation_updates)  # Slower for smoothness
+            if not self.window.winfo_exists():
+                return
+            
+            # Update animation
+            self._update_animation()
+            
+            # Schedule next update - SINGLE scheduler only
+            self.animation_id = self.window.after(300, self._start_single_animation)
+            
         except (tk.TclError, AttributeError):
             self.animation_running = False
     
     def _update_animation(self):
-        """FIXED: Single animation method to prevent conflicts"""
+        """Update animation elements"""
         try:
-            if not hasattr(self, 'progress_label') or not self.progress_label.winfo_exists():
+            if not self.animation_running or not hasattr(self, 'progress_label'):
                 return
-                
-            # FIXED: Simple progress states - no complex patterns
-            states = ["●○○○○", "○●○○○", "○○●○○", "○○○●○", "○○○○●", "○○○●○", "○○●○○", "○●○○○"]
             
-            # Update progress
-            self.progress_label.configure(text=states[self.animation_step % len(states)])
+            # Simple progress animation
+            states = ["●○○○○", "○●○○○", "○○●○○", "○○○●○", "○○○○●"]
+            current_state = states[self.animation_step % len(states)]
             
-            # Update icon occasionally
-            if self.animation_step % 4 == 0:  # Every 4th step
+            self.progress_label.configure(text=current_state)
+            
+            # Occasionally update icon
+            if self.animation_step % 5 == 0:
                 icons = ["⚡", "⚙", "🔄", "⭐"]
-                icon = icons[(self.animation_step // 4) % len(icons)]
+                icon = icons[(self.animation_step // 5) % len(icons)]
                 self.icon_label.configure(text=icon)
             
             self.animation_step += 1
-            
-            # Force immediate update
-            self.progress_label.update_idletasks()
             
         except (tk.TclError, AttributeError):
             self.animation_running = False
     
     def update_status(self, status):
-        """Update status with error handling"""
+        """Update status text safely"""
         try:
             if hasattr(self, 'status_label') and self.status_label.winfo_exists():
                 self.status_label.configure(text=status)
-                # Force update without blocking
-                if hasattr(self, 'window'):
-                    self.window.update_idletasks()
+                # FIXED: Non-blocking update
+                self.window.update_idletasks()
         except (tk.TclError, AttributeError):
             pass
     
     def close(self):
-        """Safely close the overlay"""
+        """FIXED: Safe close with animation cleanup"""
         self.animation_running = False
+        
+        # Cancel scheduled animation
+        if self.animation_id:
+            try:
+                self.window.after_cancel(self.animation_id)
+            except:
+                pass
+        
         try:
             if hasattr(self, 'window') and self.window.winfo_exists():
-                self.window.withdraw()  # Hide first
-                self.window.update_idletasks()
-                self.window.destroy()  # Then destroy
+                self.window.withdraw()
+                self.window.destroy()
         except (tk.TclError, AttributeError):
             pass
         finally:
-            # Clear references
             self.window = None
+            self.animation_id = None
