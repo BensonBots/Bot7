@@ -1,6 +1,6 @@
 """
 BENSON v2.0 - Create Instance Dialog (FIXED)
-Beautiful, modern dialog for creating new MEmu instances with proper positioning and buttons
+Fixed positioning for multi-monitor setups and proper parent window centering
 """
 
 import tkinter as tk
@@ -8,7 +8,7 @@ from tkinter import messagebox
 
 
 class CreateInstanceDialog:
-    """Modern, beautiful dialog for creating MEmu instances"""
+    """Modern dialog with FIXED multi-monitor positioning"""
     
     def __init__(self, parent, app_ref):
         self.parent = parent
@@ -17,7 +17,7 @@ class CreateInstanceDialog:
         self.result = None
         
     def show(self):
-        """Show the create instance dialog"""
+        """Show the create instance dialog with FIXED positioning"""
         try:
             # Create modern dialog window
             self.dialog = tk.Toplevel(self.parent)
@@ -27,48 +27,14 @@ class CreateInstanceDialog:
             self.dialog.grab_set()
             self.dialog.resizable(False, False)
             
-            # FIXED: Wait for parent to be fully rendered
-            self.parent.update_idletasks()
-            
-            # FIXED: Get parent window's actual position after it's stable
+            # FIXED: Get correct positioning for multi-monitor setups
             dialog_width = 520
-            dialog_height = 450  # Increased for buttons
+            dialog_height = 450
             
-            # Multiple attempts to get correct parent position
-            for _ in range(3):
-                try:
-                    parent_x = self.parent.winfo_x()
-                    parent_y = self.parent.winfo_y()
-                    parent_width = self.parent.winfo_width()
-                    parent_height = self.parent.winfo_height()
-                    
-                    if parent_x > 0 and parent_y > 0:  # Valid coordinates
-                        break
-                except:
-                    continue
-                self.parent.update()
+            # FIXED: Better parent window detection
+            x, y = self._get_proper_dialog_position(dialog_width, dialog_height)
             
-            # FIXED: Center dialog relative to parent window with offset compensation
-            x = parent_x + (parent_width - dialog_width) // 2
-            y = parent_y + (parent_height - dialog_height) // 2
-            
-            print(f"[CreateDialog] Parent: {parent_x},{parent_y} ({parent_width}x{parent_height})")
-            print(f"[CreateDialog] Dialog will be at: {x},{y}")
-            
-            # Ensure dialog stays on screen but prioritize parent centering
-            screen_width = self.dialog.winfo_screenwidth()
-            screen_height = self.dialog.winfo_screenheight()
-            
-            # Only adjust if really off-screen
-            if x < -100:
-                x = 50
-            elif x > screen_width - dialog_width + 100:
-                x = screen_width - dialog_width - 50
-                
-            if y < -50:
-                y = 50
-            elif y > screen_height - dialog_height + 50:
-                y = screen_height - dialog_height - 50
+            print(f"[CreateDialog] Positioning dialog at: {x},{y}")
             
             # FIXED: Set geometry immediately and force update
             self.dialog.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
@@ -80,10 +46,12 @@ class CreateInstanceDialog:
             # Setup events
             self._setup_events()
             
-            # FIXED: Force dialog to appear on correct monitor
+            # FIXED: Force dialog to appear properly
             self.dialog.update()
             self.dialog.lift()
             self.dialog.focus_force()
+            self.dialog.attributes('-topmost', True)
+            self.dialog.after(100, lambda: self.dialog.attributes('-topmost', False))
             
             # Wait for dialog to close
             self.dialog.wait_window()
@@ -99,6 +67,73 @@ class CreateInstanceDialog:
                     pass
             messagebox.showerror("Error", f"Could not create dialog: {str(e)}")
             return None
+    
+    def _get_proper_dialog_position(self, dialog_width, dialog_height):
+        """FIXED: Get proper dialog position for multi-monitor setups"""
+        try:
+            # Force parent to update and get accurate position
+            self.parent.update_idletasks()
+            
+            # Try multiple approaches to get parent position
+            parent_x = None
+            parent_y = None
+            parent_width = None
+            parent_height = None
+            
+            # Approach 1: Direct parent window info
+            try:
+                parent_x = self.parent.winfo_x()
+                parent_y = self.parent.winfo_y()
+                parent_width = self.parent.winfo_width()
+                parent_height = self.parent.winfo_height()
+                
+                # Validate coordinates
+                if parent_x <= -10000 or parent_y <= -10000:
+                    raise ValueError("Invalid parent coordinates")
+                    
+                print(f"[CreateDialog] Parent window: {parent_x},{parent_y} ({parent_width}x{parent_height})")
+                
+            except Exception as e:
+                print(f"[CreateDialog] Failed to get parent position: {e}")
+                parent_x = None
+            
+            # Approach 2: If parent coordinates are valid, center on parent
+            if parent_x is not None and parent_x > -1000 and parent_y > -1000:
+                x = parent_x + (parent_width - dialog_width) // 2
+                y = parent_y + (parent_height - dialog_height) // 2
+                
+                # Validate that dialog will be visible
+                screen_width = self.dialog.winfo_screenwidth()
+                screen_height = self.dialog.winfo_screenheight()
+                
+                # Keep dialog on screen with some margin
+                if x < 0:
+                    x = 50
+                elif x + dialog_width > screen_width:
+                    x = screen_width - dialog_width - 50
+                
+                if y < 0:
+                    y = 50
+                elif y + dialog_height > screen_height:
+                    y = screen_height - dialog_height - 50
+                
+                print(f"[CreateDialog] Centering on parent: {x},{y}")
+                return x, y
+            
+            # Approach 3: Fallback - center on primary screen
+            screen_width = self.dialog.winfo_screenwidth()
+            screen_height = self.dialog.winfo_screenheight()
+            
+            x = (screen_width - dialog_width) // 2
+            y = (screen_height - dialog_height) // 2
+            
+            print(f"[CreateDialog] Fallback to screen center: {x},{y}")
+            return x, y
+            
+        except Exception as e:
+            print(f"[CreateDialog] Error calculating position: {e}")
+            # Emergency fallback
+            return 500, 300
     
     def _setup_ui(self, width, height):
         """Setup the dialog UI"""
@@ -125,7 +160,7 @@ class CreateInstanceDialog:
         # Info section
         self._setup_info_section(content)
         
-        # FIXED: Button section - ensure it's visible
+        # Button section
         self._setup_buttons(content)
     
     def _setup_title_bar(self, parent):
@@ -144,7 +179,7 @@ class CreateInstanceDialog:
         )
         title_label.pack(side="left", padx=20, pady=12)
         
-        # Close button
+        # Close button with hover effects
         close_btn = tk.Button(
             title_bar,
             text="×",
@@ -158,6 +193,16 @@ class CreateInstanceDialog:
             command=self._on_cancel
         )
         close_btn.pack(side="right", padx=15, pady=12)
+        
+        # Add hover effects to close button
+        def on_enter(e):
+            close_btn.configure(bg="#ff4444", fg="#ffffff")
+        
+        def on_leave(e):
+            close_btn.configure(bg="#2d3442", fg="#ff6b6b")
+        
+        close_btn.bind("<Enter>", on_enter)
+        close_btn.bind("<Leave>", on_leave)
         
         # Make draggable
         self._make_draggable(title_bar)
@@ -253,7 +298,7 @@ class CreateInstanceDialog:
         info_text.pack(padx=12, pady=10, anchor="w")
     
     def _setup_buttons(self, parent):
-        """FIXED: Setup button section with proper positioning"""
+        """Setup button section with hover effects"""
         # Create button container that stays at bottom
         button_container = tk.Frame(parent, bg="#1e2329")
         button_container.pack(side="bottom", fill="x", pady=(0, 15))
@@ -262,7 +307,7 @@ class CreateInstanceDialog:
         button_frame = tk.Frame(button_container, bg="#1e2329")
         button_frame.pack()
         
-        # Cancel button
+        # Cancel button with hover effects
         self.cancel_btn = tk.Button(
             button_frame,
             text="Cancel",
@@ -278,7 +323,7 @@ class CreateInstanceDialog:
         )
         self.cancel_btn.pack(side="left", padx=(0, 15))
         
-        # Create button
+        # Create button with hover effects
         self.create_btn = tk.Button(
             button_frame,
             text="✓ Create Instance",
@@ -295,8 +340,42 @@ class CreateInstanceDialog:
         self.create_btn.pack(side="left")
         
         # Add hover effects
-        self._add_button_hover(self.cancel_btn, "#404040", "#555555")
-        self._add_button_hover(self.create_btn, "#00ff88", "#00ff99")
+        self._add_button_hover(self.cancel_btn, "#404040", "#555555", "#ffffff", "#ffffff")
+        self._add_button_hover(self.create_btn, "#00ff88", "#00ff99", "#000000", "#000000")
+    
+    def _add_button_hover(self, button, normal_bg, hover_bg, normal_fg, hover_fg):
+        """Add hover effects to buttons"""
+        def on_enter(e):
+            try:
+                button.configure(bg=hover_bg, fg=hover_fg, relief="raised", bd=1)
+            except:
+                pass
+        
+        def on_leave(e):
+            try:
+                button.configure(bg=normal_bg, fg=normal_fg, relief="flat", bd=0)
+            except:
+                pass
+        
+        def on_click(e):
+            try:
+                click_color = self._get_click_color(normal_bg)
+                button.configure(bg=click_color)
+                button.after(100, lambda: button.configure(bg=normal_bg))
+            except:
+                pass
+        
+        button.bind("<Enter>", on_enter)
+        button.bind("<Leave>", on_leave)
+        button.bind("<Button-1>", on_click)
+    
+    def _get_click_color(self, color):
+        """Get click color for button"""
+        click_map = {
+            "#404040": "#303030",
+            "#00ff88": "#00dd77"
+        }
+        return click_map.get(color, color)
     
     def _setup_placeholder(self):
         """Setup placeholder text functionality"""
@@ -329,7 +408,7 @@ class CreateInstanceDialog:
         self.name_entry.bind('<Return>', lambda e: self._on_create())
     
     def _make_draggable(self, widget):
-        """Make dialog draggable"""
+        """Make dialog draggable with proper screen bounds"""
         def start_drag(event):
             try:
                 widget.start_x = event.x
@@ -343,14 +422,15 @@ class CreateInstanceDialog:
                 x = self.dialog.winfo_x() + (event.x - widget.start_x)
                 y = self.dialog.winfo_y() + (event.y - widget.start_y)
                 
-                # Keep on screen
+                # Keep on screen with proper bounds
                 screen_width = self.dialog.winfo_screenwidth()
                 screen_height = self.dialog.winfo_screenheight()
                 dialog_width = self.dialog.winfo_width()
                 dialog_height = self.dialog.winfo_height()
                 
-                x = max(0, min(x, screen_width - dialog_width))
-                y = max(0, min(y, screen_height - dialog_height))
+                # Allow some off-screen dragging but keep mostly visible
+                x = max(-dialog_width + 100, min(x, screen_width - 100))
+                y = max(0, min(y, screen_height - 50))
                 
                 self.dialog.geometry(f"+{x}+{y}")
             except Exception as e:
@@ -368,40 +448,6 @@ class CreateInstanceDialog:
             widget.bind("<ButtonRelease-1>", stop_drag)
         except Exception as e:
             print(f"[CreateInstanceDialog] Drag binding error: {e}")
-    
-    def _add_button_hover(self, button, normal_color, hover_color):
-        """Add hover effects to buttons"""
-        def on_enter(e):
-            try:
-                button.configure(bg=hover_color, relief="raised", bd=1)
-            except:
-                pass
-        
-        def on_leave(e):
-            try:
-                button.configure(bg=normal_color, relief="flat", bd=0)
-            except:
-                pass
-        
-        def on_click(e):
-            try:
-                click_color = self._get_click_color(normal_color)
-                button.configure(bg=click_color)
-                button.after(100, lambda: button.configure(bg=normal_color))
-            except:
-                pass
-        
-        button.bind("<Enter>", on_enter)
-        button.bind("<Leave>", on_leave)
-        button.bind("<Button-1>", on_click)
-    
-    def _get_click_color(self, color):
-        """Get click color for button"""
-        click_map = {
-            "#404040": "#303030",
-            "#00ff88": "#00dd77"
-        }
-        return click_map.get(color, color)
     
     def _on_create(self):
         """Handle create button click"""

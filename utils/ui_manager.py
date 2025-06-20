@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - Fixed UI Manager with Correct InstanceCard Import
-Fixed import path and simplified card creation
+BENSON v2.0 - Fixed UI Manager with Proper Positioning and Hover Effects
+Fixed window positioning, dialog centering, and added hover effects to all buttons
 """
 
 import tkinter as tk
@@ -8,7 +8,7 @@ from tkinter import messagebox
 
 
 class UIManager:
-    """Fixed UI manager with correct InstanceCard import"""
+    """Fixed UI manager with proper positioning and hover effects"""
     
     def __init__(self, app_ref):
         self.app = app_ref
@@ -17,12 +17,12 @@ class UIManager:
         self.start_y = 0
     
     def setup_header(self):
-        """Setup header with safer custom window controls"""
+        """Setup header with custom window controls and hover effects"""
         header = tk.Frame(self.app, bg="#0a0e16", height=70)
         header.pack(fill="x", padx=10, pady=(10, 0))
         header.pack_propagate(False)
         
-        # Left - Title section
+        # Left - Title section (draggable)
         title_frame = tk.Frame(header, bg="#0a0e16")
         title_frame.pack(side="left", fill="y")
         
@@ -31,7 +31,8 @@ class UIManager:
             text="BENSON v2.0",
             bg="#0a0e16",
             fg="#f0f6fc",
-            font=("Segoe UI", 18, "bold")
+            font=("Segoe UI", 18, "bold"),
+            cursor="fleur"
         )
         title_label.pack(side="left")
         
@@ -40,9 +41,14 @@ class UIManager:
             text="benson.gg",
             bg="#0a0e16",
             fg="#00d4ff",
-            font=("Segoe UI", 10, "bold")
+            font=("Segoe UI", 10, "bold"),
+            cursor="fleur"
         )
         subtitle.pack(side="left", padx=(10, 0), pady=(2, 0))
+        
+        # Make window draggable via title
+        self.make_draggable_safe(title_label)
+        self.make_draggable_safe(subtitle)
         
         # Center - Smaller search bar
         search_frame = tk.Frame(header, bg="#0a0e16")
@@ -50,11 +56,11 @@ class UIManager:
         
         self.setup_search_bar(search_frame)
         
-        # Right - Custom window controls
+        # Right - Custom window controls with FIXED hover effects
         controls_frame = tk.Frame(header, bg="#0a0e16")
         controls_frame.pack(side="right")
         
-        # Minimize button
+        # Minimize button with hover effects
         minimize_btn = tk.Button(
             controls_frame,
             text="−",
@@ -70,7 +76,10 @@ class UIManager:
         )
         minimize_btn.pack(side="left", padx=(0, 2))
         
-        # Close button
+        # Add hover effects to minimize button
+        self._add_button_hover(minimize_btn, "#1a1f2e", "#2d3748", "#8b949e", "#ffffff")
+        
+        # Close button with hover effects
         close_btn = tk.Button(
             controls_frame,
             text="×",
@@ -86,11 +95,48 @@ class UIManager:
         )
         close_btn.pack(side="left")
         
-        # Make window draggable
-        try:
-            self.make_draggable_safe(title_frame)
-        except Exception as e:
-            print(f"[UIManager] Could not setup dragging: {e}")
+        # Add hover effects to close button
+        self._add_button_hover(close_btn, "#1a1f2e", "#ff4444", "#ff6b6b", "#ffffff")
+    
+    def _add_button_hover(self, button, normal_bg, hover_bg, normal_fg, hover_fg):
+        """Add hover effects to any button"""
+        def on_enter(e):
+            try:
+                button.configure(bg=hover_bg, fg=hover_fg)
+            except tk.TclError:
+                pass
+        
+        def on_leave(e):
+            try:
+                button.configure(bg=normal_bg, fg=normal_fg)
+            except tk.TclError:
+                pass
+        
+        def on_click(e):
+            try:
+                # Click effect
+                click_bg = self._darken_color(hover_bg)
+                button.configure(bg=click_bg)
+                button.after(100, lambda: button.configure(bg=normal_bg, fg=normal_fg))
+            except tk.TclError:
+                pass
+        
+        button.bind("<Enter>", on_enter)
+        button.bind("<Leave>", on_leave)
+        button.bind("<Button-1>", on_click)
+    
+    def _darken_color(self, color):
+        """Darken a color for click effect"""
+        color_map = {
+            "#2d3748": "#1a202c",
+            "#ff4444": "#cc3333",
+            "#00ff99": "#00dd77",
+            "#33ddff": "#00aacc",
+            "#33ea88": "#00cc55",
+            "#ff8888": "#ff4444",
+            "#252a39": "#1a1f2e"
+        }
+        return color_map.get(color, color)
     
     def setup_search_bar(self, parent):
         """Setup smaller search bar"""
@@ -189,13 +235,15 @@ class UIManager:
         
         # Add hover effects
         original_bg = bg
+        original_fg = fg
         hover_bg = self._get_hover_color(bg)
+        hover_fg = self._get_hover_text_color(bg)
         
         def on_enter(e):
-            btn.configure(bg=hover_bg, relief="raised", bd=1)
+            btn.configure(bg=hover_bg, fg=hover_fg, relief="raised", bd=1)
         
         def on_leave(e):
-            btn.configure(bg=original_bg, relief="flat", bd=0)
+            btn.configure(bg=original_bg, fg=original_fg, relief="flat", bd=0)
         
         def on_click(e):
             btn.configure(bg=self._get_click_color(bg))
@@ -217,6 +265,14 @@ class UIManager:
             "#1a1f2e": "#252a39"
         }
         return hover_map.get(color, color)
+    
+    def _get_hover_text_color(self, bg_color):
+        """Get appropriate text color for hover state"""
+        # For light backgrounds, keep text dark; for dark backgrounds, keep text light
+        light_bgs = ["#00ff88", "#00ff99", "#00d4ff", "#33ddff", "#00e676", "#33ea88"]
+        if bg_color in light_bgs:
+            return "#000000"
+        return "#ffffff"
     
     def _get_click_color(self, color):
         """Get click color for a given color"""
@@ -331,50 +387,77 @@ class UIManager:
             print(f"[UIManager] Error closing: {e}")
     
     def make_draggable_safe(self, widget):
-        """Safer draggable implementation without overrideredirect"""
+        """FIXED: Simplified dragging without event conflicts"""
         def start_drag(event):
             try:
+                # Only start drag on left click, not other events
+                if event.num != 1:
+                    return
+                    
                 self.dragging = True
                 self.start_x = event.x_root - self.app.winfo_x()
                 self.start_y = event.y_root - self.app.winfo_y()
                 widget.configure(cursor="fleur")
+                print(f"[UIManager] Drag started at: {event.x_root}, {event.y_root}")
+                
+                # Prevent event propagation
+                return "break"
+                
             except Exception as e:
                 print(f"[UIManager] Error starting drag: {e}")
                 self.dragging = False
         
         def drag_window(event):
             try:
-                if self.dragging:
-                    x = event.x_root - self.start_x
-                    y = event.y_root - self.start_y
+                if not self.dragging:
+                    return
                     
-                    # Constrain to screen bounds
-                    screen_width = self.app.winfo_screenwidth()
-                    screen_height = self.app.winfo_screenheight()
-                    window_width = self.app.winfo_width()
-                    window_height = self.app.winfo_height()
-                    
-                    # Keep window on screen
-                    x = max(0, min(x, screen_width - window_width))
-                    y = max(0, min(y, screen_height - window_height))
-                    
-                    self.app.geometry(f"+{x}+{y}")
+                # Calculate new window position
+                new_x = event.x_root - self.start_x
+                new_y = event.y_root - self.start_y
+                
+                # Get screen and window dimensions
+                screen_width = self.app.winfo_screenwidth()
+                screen_height = self.app.winfo_screenheight()
+                window_width = self.app.winfo_width()
+                window_height = self.app.winfo_height()
+                
+                # Keep window mostly on screen
+                new_x = max(-window_width + 100, min(new_x, screen_width - 100))
+                new_y = max(0, min(new_y, screen_height - 50))
+                
+                # Move window
+                self.app.geometry(f"{window_width}x{window_height}+{new_x}+{new_y}")
+                
+                # Prevent event propagation
+                return "break"
+                
             except Exception as e:
                 print(f"[UIManager] Error during drag: {e}")
                 self.dragging = False
         
         def stop_drag(event):
             try:
-                self.dragging = False
-                widget.configure(cursor="")
+                if self.dragging:
+                    self.dragging = False
+                    widget.configure(cursor="")
+                    print(f"[UIManager] Drag stopped")
+                    
+                    # Prevent event propagation
+                    return "break"
+                    
             except Exception as e:
                 print(f"[UIManager] Error stopping drag: {e}")
         
         try:
+            # FIXED: Bind only to the specific widget, not globally
             widget.bind("<Button-1>", start_drag)
             widget.bind("<B1-Motion>", drag_window)
             widget.bind("<ButtonRelease-1>", stop_drag)
-            self.app.bind("<ButtonRelease-1>", stop_drag)
+            
+            # Don't bind globally to prevent conflicts
+            print(f"[UIManager] Made {widget} draggable")
+            
         except Exception as e:
             print(f"[UIManager] Error binding drag events: {e}")
     
@@ -393,9 +476,12 @@ class UIManager:
             print(f"[UIManager] Error toggling console: {e}")
     
     def create_instance_with_enhanced_dialog(self):
-        """Create instance using the separate dialog file"""
+        """Create instance using the enhanced dialog with FIXED positioning"""
         try:
             from gui.dialogs.create_instance_dialog import show_create_instance_dialog
+            
+            # FIXED: Get proper parent position for dialog centering
+            self.app.update_idletasks()  # Ensure parent is fully rendered
             
             instance_name = show_create_instance_dialog(self.app, self.app)
             
@@ -431,9 +517,12 @@ class UIManager:
         self.create_instance_with_enhanced_dialog()
     
     def show_modules(self, instance_name):
-        """Show modules window for an instance"""
+        """Show modules window for an instance with FIXED positioning"""
         try:
             self.app.add_console_message(f"Opening module configuration for: {instance_name}")
+            
+            # FIXED: Ensure parent is rendered before opening dialog
+            self.app.update_idletasks()
             
             from gui.dialogs.modules_window import ModulesWindow
             ModulesWindow(self.app, instance_name, app_ref=self.app)
