@@ -22,25 +22,25 @@ class InstanceOperations:
             return
 
         name = name.strip()
-        
+
         # Import the FIXED loading card component
         from gui.components.loading_instance_card import create_loading_instance_card
-        
+
         # Create and show loading card immediately
         loading_card = create_loading_instance_card(self.app.instances_container, name)
-        
+
         # Position the loading card
         current_cards = len(self.app.instance_cards)
         row = current_cards // 2
         col = current_cards % 2
         loading_card.grid(row=row, column=col, padx=4, pady=2, sticky="e" if col == 0 else "w")
-        
+
         # Add to instance cards list temporarily
         self.app.instance_cards.append(loading_card)
-        
+
         # FIXED: Force immediate UI update without blocking
         self.app.update_idletasks()
-        
+
         # Log start
         self.app.add_console_message(f"🔄 Creating MEmu instance: {name}")
 
@@ -48,18 +48,18 @@ class InstanceOperations:
             """FIXED: Non-blocking creation worker"""
             success = False
             error_msg = None
-            
+
             try:
                 # Small delay to let UI render
                 time.sleep(0.1)
-                
+
                 # Call the actual creation method
                 success = self.app.instance_manager.create_instance_with_name(name)
-                
+
             except Exception as e:
                 error_msg = str(e)
                 success = False
-            
+
             # Schedule completion on main thread - FIXED: Non-blocking
             self.app.after_idle(lambda: self._complete_create_with_loading_card(
                 name, loading_card, success, error_msg
@@ -74,24 +74,24 @@ class InstanceOperations:
             if success:
                 # Show success animation
                 loading_card.show_success()
-                
+
                 # Schedule replacement after success animation - FIXED: Non-blocking timing
                 self.app.after(1200, lambda: self._replace_with_real_card(name, loading_card))
-                
+
             else:
                 # Show error animation
                 error_message = error or "Unknown error occurred"
                 loading_card.show_error(error_message)
-                
+
                 # Remove from list after error - FIXED: Non-blocking cleanup
                 self.app.after(100, lambda: self._remove_failed_card(loading_card))
-                
+
                 # Log error
                 error_msg = f"Failed to create instance: {name}"
                 if error:
                     error_msg += f" - {error}"
                 self.app.add_console_message(f"❌ {error_msg}")
-                
+
         except Exception as e:
             print(f"[InstanceOps] Error in completion handler: {e}")
             # Cleanup loading card if something goes wrong
@@ -105,31 +105,31 @@ class InstanceOperations:
             if loading_card in self.app.instance_cards:
                 loading_index = self.app.instance_cards.index(loading_card)
                 self.app.instance_cards.remove(loading_card)
-            
+
             # Start background refresh to get new instance data
             def refresh_worker():
                 try:
                     # Refresh instance data
                     self.app.instance_manager.load_real_instances()
-                    
+
                     # Find the new instance
                     new_instance = self.app.instance_manager.get_instance(name)
                     if not new_instance:
                         self.app.after_idle(lambda: self._handle_missing_instance(loading_card, name))
                         return
-                    
+
                     # Schedule real card creation on main thread
                     self.app.after_idle(lambda: self._create_real_card_final(
                         name, new_instance["status"], loading_card, loading_index
                     ))
-                    
+
                 except Exception as e:
                     print(f"[InstanceOps] Error in refresh worker: {e}")
                     self.app.after_idle(lambda: self._handle_refresh_error(loading_card, name))
-            
+
             # Start refresh in background
             threading.Thread(target=refresh_worker, daemon=True).start()
-            
+
         except Exception as e:
             print(f"[InstanceOps] Error replacing card: {e}")
             self._cleanup_loading_card(loading_card)
@@ -139,22 +139,22 @@ class InstanceOperations:
         try:
             # Create the real instance card
             real_card = self.app.ui_manager.create_instance_card(name, status)
-            
+
             if real_card:
                 # Insert at correct position
                 if loading_index is not None:
                     self.app.instance_cards.insert(loading_index, real_card)
                 else:
                     self.app.instance_cards.append(real_card)
-                
+
                 # Destroy loading card
                 loading_card.destroy()
-                
+
                 # FIXED: Schedule layout update to prevent blocking
                 self.app.after_idle(lambda: self._finalize_card_creation(name))
             else:
                 self._handle_card_creation_failure(loading_card, name)
-                
+
         except Exception as e:
             print(f"[InstanceOps] Error creating real card: {e}")
             self._cleanup_loading_card(loading_card)
@@ -164,13 +164,13 @@ class InstanceOperations:
         try:
             # Reposition all cards
             self.app.reposition_all_cards()
-            
+
             # Update counter
             self.app.force_counter_update()
-            
+
             # Log success
             self.app.add_console_message(f"✅ Successfully created MEmu instance: {name}")
-            
+
         except Exception as e:
             print(f"[InstanceOps] Error finalizing: {e}")
 
@@ -219,25 +219,25 @@ class InstanceOperations:
 
         # Import the deleting card component
         from gui.components.deleting_instance_card import create_deleting_instance_card
-        
+
         # Get the card's position before replacing it
         card_index = None
         if card in self.app.instance_cards:
             card_index = self.app.instance_cards.index(card)
-        
+
         # Create deleting card at same position
         deleting_card = create_deleting_instance_card(self.app.instances_container, card.name)
-        
+
         # Replace the original card with deleting card
         if card_index is not None:
             # Remove original card
             self.app.instance_cards[card_index] = deleting_card
             row = card_index // 2
             col = card_index % 2
-            
+
             # Destroy original card
             card.destroy()
-            
+
             # Position deleting card
             deleting_card.grid(row=row, column=col, padx=4, pady=2, 
                              sticky="e" if col == 0 else "w")
@@ -246,10 +246,10 @@ class InstanceOperations:
             self.app.instance_cards.append(deleting_card)
             card.destroy()
             self.app.reposition_all_cards()
-        
+
         # Update UI
         self.app.update_idletasks()
-        
+
         # Log start
         self.app.add_console_message(f"🗑 Deleting MEmu instance: {card.name}")
 
@@ -257,18 +257,18 @@ class InstanceOperations:
             """FIXED: Non-blocking deletion worker"""
             success = False
             error_msg = None
-            
+
             try:
                 # Small delay for animation to start
                 time.sleep(0.2)
-                
+
                 # Perform actual deletion
                 success = self.app.instance_manager.delete_instance(card.name)
-                
+
             except Exception as e:
                 error_msg = str(e)
                 success = False
-            
+
             # Schedule completion on main thread
             self.app.after_idle(lambda: self._complete_delete_with_animation(
                 card.name, deleting_card, success, error_msg
@@ -283,21 +283,21 @@ class InstanceOperations:
             if success:
                 # Show success animation
                 deleting_card.show_success()
-                
+
                 # Schedule cleanup after success animation
                 self.app.after(2000, lambda: self._finalize_deletion(name, deleting_card))
-                
+
             else:
                 # Show error animation
                 error_message = error or "Deletion failed"
                 deleting_card.show_error(error_message)
-                
+
                 # Log error
                 self.app.add_console_message(f"❌ Failed to delete {name}: {error_message}")
-                
+
                 # Keep error card visible longer, then remove
                 self.app.after(5000, lambda: self._cleanup_deleting_card(deleting_card))
-                
+
         except Exception as e:
             print(f"[InstanceOps] Error in delete completion: {e}")
             self._cleanup_deleting_card(deleting_card)
@@ -308,12 +308,12 @@ class InstanceOperations:
             # Remove deleting card from list
             if deleting_card in self.app.instance_cards:
                 self.app.instance_cards.remove(deleting_card)
-            
+
             # Card will destroy itself after fade animation
-            
+
             # Refresh instance list
             self.app.after_idle(lambda: self._refresh_after_deletion(name))
-            
+
         except Exception as e:
             print(f"[InstanceOps] Error finalizing deletion: {e}")
 
@@ -322,13 +322,13 @@ class InstanceOperations:
         try:
             # Reposition remaining cards
             self.app.reposition_all_cards()
-            
+
             # Update counter
             self.app.force_counter_update()
-            
+
             # Log success
             self.app.add_console_message(f"✅ Successfully deleted instance: {name}")
-            
+
         except Exception as e:
             print(f"[InstanceOps] Error refreshing after deletion: {e}")
 
@@ -338,11 +338,11 @@ class InstanceOperations:
             if deleting_card in self.app.instance_cards:
                 self.app.instance_cards.remove(deleting_card)
             deleting_card.destroy()
-            
+
             # Reposition cards
             self.app.reposition_all_cards()
             self.app.force_counter_update()
-            
+
         except:
             pass
 
@@ -403,15 +403,15 @@ class InstanceOperations:
             return
 
         self.app.add_console_message(f"Starting {len(selected_cards)} selected instances...")
-        
+
         def start_worker():
             for i, card in enumerate(selected_cards):
                 # Stagger starts to prevent system overload
                 time.sleep(i * 0.5)
-                
+
                 # Schedule on main thread
                 self.app.after_idle(lambda name=card.name: self._start_instance_async(name))
-        
+
         threading.Thread(target=start_worker, daemon=True).start()
 
     def stop_selected_instances(self):
@@ -422,15 +422,15 @@ class InstanceOperations:
             return
 
         self.app.add_console_message(f"Stopping {len(selected_cards)} selected instances...")
-        
+
         def stop_worker():
             for i, card in enumerate(selected_cards):
                 # Stagger stops
                 time.sleep(i * 0.3)
-                
+
                 # Schedule on main thread
                 self.app.after_idle(lambda name=card.name: self._stop_instance_async(name))
-        
+
         threading.Thread(target=stop_worker, daemon=True).start()
 
     def _start_instance_async(self, name):
@@ -498,12 +498,12 @@ class InstanceOperations:
             try:
                 # Small delay to let UI update
                 time.sleep(0.5)
-                
+
                 # Refresh instances
                 self.app.instance_manager.refresh_instances()
-                
+
                 instance_count = len(self.app.instance_manager.get_instances())
-                
+
                 # Schedule UI updates on main thread
                 self.app.after_idle(lambda: [
                     self.app.load_instances(),
@@ -511,6 +511,6 @@ class InstanceOperations:
                     self.app.add_console_message(f"Refreshed {instance_count} instances from MEmu")
                 ])
             except Exception as e:
-                self.app.after_idle(lambda: self.app.add_console_message(f"Refresh error: {str(e)}"))
+                self.app.after_idle(lambda e=e: self.app.add_console_message(f"Refresh error: {str(e)}"))
 
         threading.Thread(target=refresh_worker, daemon=True).start()

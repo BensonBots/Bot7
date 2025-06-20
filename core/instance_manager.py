@@ -95,6 +95,133 @@ class InstanceManager:
         }
         return status_map.get(code, f"Unknown({code})")
 
+
+    def stop_instance(self, name):
+        """Stop a specified MEmu instance by name"""
+        try:
+            instance = next((i for i in self.instances if i["name"] == name), None)
+            if not instance:
+                print(f"[InstanceManager] Could not find instance '{name}' to stop.")
+                return False
+
+            index = instance["index"]
+            print(f"[InstanceManager] Stopping instance '{name}' (index {index})...")
+            result = subprocess.run(
+                [self.MEMUC_PATH, "stop", "-i", str(index)],
+                capture_output=True, text=True, timeout=10
+            )
+
+            if result.returncode == 0:
+                print(f"[InstanceManager] Instance '{name}' stopped successfully.")
+                return True
+            else:
+                print(f"[InstanceManager] Failed to stop '{name}': {result.stderr}")
+                return False
+        except Exception as e:
+            print(f"[InstanceManager] ERROR stopping '{name}': {e}")
+            return False
+
+    def clone_instance(self, name):
+        """Clone a specified MEmu instance by name"""
+        try:
+            print(f"[InstanceManager] Cloning instance '{name}'...")
+            result = subprocess.run(
+                [self.MEMUC_PATH, "clone", "-n", name],
+                capture_output=True, text=True, timeout=15
+            )
+
+            if result.returncode == 0:
+                print(f"[InstanceManager] Instance '{name}' cloned successfully.")
+                return True
+            else:
+                print(f"[InstanceManager] Failed to clone '{name}': {result.stderr}")
+                return False
+        except Exception as e:
+            print(f"[InstanceManager] ERROR cloning '{name}': {e}")
+            return False
+
+
+
+    def create_instance_with_name(self, name):
+        """Create a new MEmu instance and rename it to the given name"""
+        try:
+            print(f"[InstanceManager] Creating unnamed instance...")
+            create_result = subprocess.run(
+                [self.MEMUC_PATH, "create"],
+                capture_output=True, text=True, timeout=20
+            )
+
+            if create_result.returncode != 0:
+                print(f"[InstanceManager] Failed to create instance: {create_result.stderr}")
+                return False
+
+            output = create_result.stdout.strip()
+            print(f"[InstanceManager] Create output: {output}")
+            match = re.search(r"index:\s*(\d+)", output)
+            if not match:
+                print("[InstanceManager] Could not find instance index in output.")
+                return False
+
+            new_index = match.group(1)
+            default_name = f"MEmu{new_index}"
+            print(f"[InstanceManager] Renaming '{default_name}' to '{name}'...")
+
+            rename_result = subprocess.run(
+                [self.MEMUC_PATH, "rename", "-n", default_name, name],
+                capture_output=True, text=True, timeout=10
+            )
+
+            if rename_result.returncode == 0:
+                print(f"[InstanceManager] Successfully renamed '{default_name}' to '{name}'.")
+                return True
+            else:
+                print(f"[InstanceManager] Failed to rename instance: {rename_result.stderr}")
+                return False
+
+        except Exception as e:
+            print(f"[InstanceManager] ERROR during create/rename: {e}")
+            return False
+
+            # Extract the index from output (e.g., "Create instance success, index: 9")
+            output = create_result.stdout.strip()
+            print(f"[InstanceManager] Create output: {output}")
+            match = re.search(r"index:\s*(\d+)", output)
+            if not match:
+                print("[InstanceManager] Could not find instance index in output.")
+                return False
+
+            new_index = match.group(1)
+            print(f"[InstanceManager] Renaming instance index {new_index} to '{name}'...")
+
+            rename_result = subprocess.run(
+                [self.MEMUC_PATH, "rename", "-i", new_index, "-n", name],
+                capture_output=True, text=True, timeout=10
+            )
+
+            if rename_result.returncode == 0:
+                print(f"[InstanceManager] Successfully renamed instance to '{name}'.")
+                return True
+            else:
+                print(f"[InstanceManager] Failed to rename instance: {rename_result.stderr}")
+                return False
+
+        except Exception as e:
+            print(f"[InstanceManager] ERROR during create/rename: {e}")
+            return False
+        except Exception as e:
+            print(f"[InstanceManager] ERROR creating '{name}': {e}")
+            return False
+
+
+
+    def get_instance(self, name):
+        """Return instance dict by name"""
+        for instance in self.instances:
+            if instance["name"] == name:
+                return instance
+        return None
+
+
     def get_instances(self):
         """Get list of instances"""
         return self.instances
