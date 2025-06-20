@@ -1,20 +1,25 @@
 """
-BENSON v2.0 - Fixed UI Manager with Proper Positioning and Hover Effects
-Fixed window positioning, dialog centering, and added hover effects to all buttons
+BENSON v2.0 - FIXED UI Manager with Scrollable Instance Area
+Added scrollable canvas for many instances and fixed positioning
 """
 
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 
 
 class UIManager:
-    """Fixed UI manager with proper positioning and hover effects"""
+    """FIXED UI manager with scrollable instance area"""
     
     def __init__(self, app_ref):
         self.app = app_ref
         self.dragging = False
         self.start_x = 0
         self.start_y = 0
+        
+        # Scrollable area components
+        self.instances_canvas = None
+        self.instances_frame = None
+        self.scrollbar = None
     
     def setup_header(self):
         """Setup header with custom window controls and hover effects"""
@@ -56,7 +61,7 @@ class UIManager:
         
         self.setup_search_bar(search_frame)
         
-        # Right - Custom window controls with FIXED hover effects
+        # Right - Custom window controls with hover effects
         controls_frame = tk.Frame(header, bg="#0a0e16")
         controls_frame.pack(side="right")
         
@@ -183,10 +188,10 @@ class UIManager:
         left_frame = tk.Frame(controls, bg="#0a0e16")
         left_frame.pack(side="left")
         
-        # Simple "Instances" header without count
+        # Instances header with count
         self.app.instances_header = tk.Label(
             left_frame,
-            text="Instances",
+            text="Instances (0)",
             bg="#0a0e16",
             fg="#00ff88",
             font=("Segoe UI", 16, "bold"),
@@ -268,7 +273,6 @@ class UIManager:
     
     def _get_hover_text_color(self, bg_color):
         """Get appropriate text color for hover state"""
-        # For light backgrounds, keep text dark; for dark backgrounds, keep text light
         light_bgs = ["#00ff88", "#00ff99", "#00d4ff", "#33ddff", "#00e676", "#33ea88"]
         if bg_color in light_bgs:
             return "#000000"
@@ -286,18 +290,129 @@ class UIManager:
         return click_map.get(color, color)
     
     def setup_main_content(self):
-        """Setup the main content area"""
+        """FIXED: Setup scrollable main content area for many instances"""
         # Main content frame
         main_frame = tk.Frame(self.app, bg="#0a0e16")
         main_frame.pack(fill="both", expand=True, padx=10)
         
-        # Create a container for instances
-        self.app.instances_container = tk.Frame(main_frame, bg="#0a0e16")
-        self.app.instances_container.pack(fill="both", expand=True)
+        # FIXED: Create scrollable area for instances
+        self._create_scrollable_instances_area(main_frame)
+    
+    def _create_scrollable_instances_area(self, parent):
+        """FIXED: Create scrollable canvas area for instances"""
+        # Container for canvas and scrollbar
+        scroll_container = tk.Frame(parent, bg="#0a0e16")
+        scroll_container.pack(fill="both", expand=True)
         
-        # Configure grid columns for 2-column layout with equal width
-        self.app.instances_container.grid_columnconfigure(0, weight=1, minsize=580)
-        self.app.instances_container.grid_columnconfigure(1, weight=1, minsize=580)
+        # Create canvas for scrolling
+        self.instances_canvas = tk.Canvas(
+            scroll_container,
+            bg="#0a0e16",
+            highlightthickness=0,
+            borderwidth=0
+        )
+        
+        # Create scrollbar
+        self.scrollbar = ttk.Scrollbar(
+            scroll_container,
+            orient="vertical",
+            command=self.instances_canvas.yview
+        )
+        
+        # Configure canvas scrolling
+        self.instances_canvas.configure(yscrollcommand=self.scrollbar.set)
+        
+        # Pack canvas and scrollbar
+        self.instances_canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+        
+        # Create frame inside canvas for instances
+        self.instances_frame = tk.Frame(self.instances_canvas, bg="#0a0e16")
+        self.canvas_window = self.instances_canvas.create_window(
+            0, 0, anchor="nw", window=self.instances_frame
+        )
+        
+        # Set the instances_container reference to the frame inside canvas
+        self.app.instances_container = self.instances_frame
+        
+        # Bind events for scrolling and resizing
+        self._bind_scroll_events()
+        
+        # Configure grid columns for 2-column layout
+        self.instances_frame.grid_columnconfigure(0, weight=1, minsize=580)
+        self.instances_frame.grid_columnconfigure(1, weight=1, minsize=580)
+        
+        print("[UIManager] Created scrollable instances area")
+    
+    def _bind_scroll_events(self):
+        """Bind scrolling and resize events"""
+        # Update scroll region when frame size changes
+        def configure_scroll_region(event):
+            self.instances_canvas.configure(scrollregion=self.instances_canvas.bbox("all"))
+        
+        self.instances_frame.bind("<Configure>", configure_scroll_region)
+        
+        # Update canvas window width when canvas is resized
+        def configure_canvas_width(event):
+            canvas_width = self.instances_canvas.winfo_width()
+            self.instances_canvas.itemconfig(self.canvas_window, width=canvas_width)
+        
+        self.instances_canvas.bind("<Configure>", configure_canvas_width)
+        
+        # Bind mouse wheel scrolling
+        def _on_mousewheel(event):
+            # Check if we actually need to scroll
+            if self.instances_canvas.bbox("all"):
+                bbox = self.instances_canvas.bbox("all")
+                canvas_height = self.instances_canvas.winfo_height()
+                content_height = bbox[3] - bbox[1]
+                
+                if content_height > canvas_height:
+                    self.instances_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        # Bind mousewheel to canvas and its children
+        def bind_mousewheel_recursive(widget):
+            widget.bind("<MouseWheel>", _on_mousewheel)
+            for child in widget.winfo_children():
+                bind_mousewheel_recursive(child)
+        
+        # Initial bind
+        self.instances_canvas.bind("<MouseWheel>", _on_mousewheel)
+        self.instances_frame.bind("<MouseWheel>", _on_mousewheel)
+        
+        # Rebind when new cards are added
+        def rebind_mousewheel():
+            try:
+                bind_mousewheel_recursive(self.instances_frame)
+            except:
+                pass
+        
+        # Store rebind function for later use
+        self.rebind_mousewheel = rebind_mousewheel
+    
+    def update_scroll_region(self):
+        """FIXED: Update scroll region after adding/removing instances"""
+        try:
+            if self.instances_canvas and self.instances_canvas.winfo_exists():
+                # Update scroll region
+                self.instances_canvas.update_idletasks()
+                self.instances_canvas.configure(scrollregion=self.instances_canvas.bbox("all"))
+                
+                # Rebind mousewheel events to new cards
+                if hasattr(self, 'rebind_mousewheel'):
+                    self.rebind_mousewheel()
+                
+        except Exception as e:
+            print(f"[UIManager] Error updating scroll region: {e}")
+    
+    def scroll_to_bottom(self):
+        """Scroll to bottom of instances list"""
+        try:
+            if self.instances_canvas:
+                self.instances_canvas.update_idletasks()
+                self.instances_canvas.yview_moveto(1.0)
+        except:
+            pass
     
     def setup_console(self):
         """Setup resizable console section"""
@@ -364,7 +479,7 @@ class UIManager:
         
         footer_text = tk.Label(
             footer,
-            text="Shortcuts: Ctrl+R (Refresh) | Ctrl+A (Select All) | Del (Delete Selected)",
+            text="Shortcuts: Ctrl+R (Refresh) | Ctrl+A (Select All) | Del (Delete Selected) | Mouse Wheel (Scroll)",
             bg="#0a0e16",
             fg="#7d8590",
             font=("Segoe UI", 8)
@@ -390,7 +505,6 @@ class UIManager:
         """FIXED: Simplified dragging without event conflicts"""
         def start_drag(event):
             try:
-                # Only start drag on left click, not other events
                 if event.num != 1:
                     return
                     
@@ -398,9 +512,6 @@ class UIManager:
                 self.start_x = event.x_root - self.app.winfo_x()
                 self.start_y = event.y_root - self.app.winfo_y()
                 widget.configure(cursor="fleur")
-                print(f"[UIManager] Drag started at: {event.x_root}, {event.y_root}")
-                
-                # Prevent event propagation
                 return "break"
                 
             except Exception as e:
@@ -412,24 +523,18 @@ class UIManager:
                 if not self.dragging:
                     return
                     
-                # Calculate new window position
                 new_x = event.x_root - self.start_x
                 new_y = event.y_root - self.start_y
                 
-                # Get screen and window dimensions
                 screen_width = self.app.winfo_screenwidth()
                 screen_height = self.app.winfo_screenheight()
                 window_width = self.app.winfo_width()
                 window_height = self.app.winfo_height()
                 
-                # Keep window mostly on screen
                 new_x = max(-window_width + 100, min(new_x, screen_width - 100))
                 new_y = max(0, min(new_y, screen_height - 50))
                 
-                # Move window
                 self.app.geometry(f"{window_width}x{window_height}+{new_x}+{new_y}")
-                
-                # Prevent event propagation
                 return "break"
                 
             except Exception as e:
@@ -441,22 +546,15 @@ class UIManager:
                 if self.dragging:
                     self.dragging = False
                     widget.configure(cursor="")
-                    print(f"[UIManager] Drag stopped")
-                    
-                    # Prevent event propagation
                     return "break"
                     
             except Exception as e:
                 print(f"[UIManager] Error stopping drag: {e}")
         
         try:
-            # FIXED: Bind only to the specific widget, not globally
             widget.bind("<Button-1>", start_drag)
             widget.bind("<B1-Motion>", drag_window)
             widget.bind("<ButtonRelease-1>", stop_drag)
-            
-            # Don't bind globally to prevent conflicts
-            print(f"[UIManager] Made {widget} draggable")
             
         except Exception as e:
             print(f"[UIManager] Error binding drag events: {e}")
@@ -480,8 +578,7 @@ class UIManager:
         try:
             from gui.dialogs.create_instance_dialog import show_create_instance_dialog
             
-            # FIXED: Get proper parent position for dialog centering
-            self.app.update_idletasks()  # Ensure parent is fully rendered
+            self.app.update_idletasks()
             
             instance_name = show_create_instance_dialog(self.app, self.app)
             
@@ -512,16 +609,11 @@ class UIManager:
         else:
             self.app.add_console_message("Instance creation cancelled")
     
-    def create_instance_with_dialog(self):
-        """Legacy method - redirects to enhanced dialog"""
-        self.create_instance_with_enhanced_dialog()
-    
     def show_modules(self, instance_name):
         """Show modules window for an instance with FIXED positioning"""
         try:
             self.app.add_console_message(f"Opening module configuration for: {instance_name}")
             
-            # FIXED: Ensure parent is rendered before opening dialog
             self.app.update_idletasks()
             
             from gui.dialogs.modules_window import ModulesWindow
@@ -533,12 +625,10 @@ class UIManager:
     def create_instance_card(self, name, status):
         """FIXED: Create a new instance card with correct import"""
         try:
-            # Import from the CORRECT file that contains InstanceCard
             from core.components.instance_card import InstanceCard
             
             print(f"[UIManager] Creating instance card for {name} with status {status}")
             
-            # Create the card
             card = InstanceCard(
                 self.app.instances_container,
                 name=name,
@@ -548,14 +638,14 @@ class UIManager:
                 app_ref=self.app
             )
             
+            # FIXED: Update scroll region after adding card
+            self.app.after_idle(self.update_scroll_region)
+            
             print(f"[UIManager] Successfully created instance card for {name}")
             return card
             
         except ImportError as e:
             print(f"[UIManager] Import error for InstanceCard: {e}")
-            print("[UIManager] Trying to create a simple fallback card...")
-            
-            # Create a simple fallback card if import fails
             return self._create_fallback_card(name, status)
             
         except Exception as e:
@@ -567,22 +657,18 @@ class UIManager:
         try:
             print(f"[UIManager] Creating fallback card for {name}")
             
-            # Simple card implementation
             card = tk.Frame(self.app.instances_container, bg="#1e2329", relief="solid", bd=1)
             card.configure(width=580, height=85)
             card.pack_propagate(False)
             
-            # Add basic properties
             card.name = name
             card.status = status
             card.selected = False
             card._destroyed = False
             
-            # Create simple content
             content_frame = tk.Frame(card, bg="#1e2329")
             content_frame.pack(fill="both", expand=True, padx=10, pady=10)
             
-            # Name label
             name_label = tk.Label(
                 content_frame,
                 text=name,
@@ -592,7 +678,6 @@ class UIManager:
             )
             name_label.pack(side="left")
             
-            # Status label
             status_label = tk.Label(
                 content_frame,
                 text=f"Status: {status}",
@@ -602,7 +687,6 @@ class UIManager:
             )
             status_label.pack(side="left", padx=(20, 0))
             
-            # Simple methods
             def toggle_checkbox():
                 card.selected = not card.selected
                 if card.selected:
@@ -614,11 +698,9 @@ class UIManager:
                 card.status = new_status
                 status_label.configure(text=f"Status: {new_status}")
             
-            # Bind methods
             card.toggle_checkbox = toggle_checkbox
             card.update_status = update_status
             
-            # Bind click event
             def on_click(event):
                 toggle_checkbox()
             

@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - Loading Instance Card Component
-Shows a fake instance card with loading animation during creation
+BENSON v2.0 - FIXED Loading Instance Card Component
+Optimized animations to prevent lag and freezing
 """
 
 import tkinter as tk
@@ -8,7 +8,7 @@ import time
 
 
 class LoadingInstanceCard(tk.Frame):
-    """Fake instance card that shows loading animation during creation"""
+    """FIXED: Loading card with optimized, non-laggy animations"""
     
     def __init__(self, parent, instance_name, **kwargs):
         super().__init__(parent, **kwargs)
@@ -18,6 +18,7 @@ class LoadingInstanceCard(tk.Frame):
         self.animation_running = True
         self.animation_step = 0
         self._destroyed = False
+        self.animation_id = None
         
         # Configure the main card frame
         self.configure(bg="#1e2329", relief="flat", bd=0, padx=3, pady=3)
@@ -27,12 +28,12 @@ class LoadingInstanceCard(tk.Frame):
         # Setup UI
         self._setup_ui()
         
-        # Start animations
-        self._start_animations()
+        # FIXED: Start optimized animations
+        self._start_optimized_animations()
     
     def _setup_ui(self):
         """Setup the loading card UI"""
-        # Main container with special loading border
+        # Main container with loading border
         self.main_container = tk.Frame(self, bg="#ffd93d", relief="solid", bd=2)
         self.main_container.place(x=0, y=0, relwidth=1, relheight=1)
         
@@ -48,7 +49,7 @@ class LoadingInstanceCard(tk.Frame):
         top_row = tk.Frame(left_frame, bg="#1e2329")
         top_row.pack(fill="x", pady=(0, 4))
         
-        # Animated loading icon instead of checkbox
+        # Simple loading icon (no animation initially)
         self.loading_icon = tk.Label(
             top_row,
             text="⚡",
@@ -73,7 +74,7 @@ class LoadingInstanceCard(tk.Frame):
         bottom_row = tk.Frame(left_frame, bg="#1e2329")
         bottom_row.pack(fill="x")
         
-        # Animated status
+        # Status icon
         self.status_icon = tk.Label(
             bottom_row,
             text="●",
@@ -93,20 +94,17 @@ class LoadingInstanceCard(tk.Frame):
         )
         self.status_text.pack(side="left", padx=(8, 0))
         
-        # Right side - loading animation
-        self._setup_loading_section()
+        # Right side - FIXED: Simplified progress
+        self._setup_progress_section()
     
-    def _setup_loading_section(self):
-        """Setup the right side loading animation"""
-        loading_frame = tk.Frame(self.content_frame, bg="#1e2329")
-        loading_frame.pack(side="right", padx=12, pady=10)
+    def _setup_progress_section(self):
+        """Setup simplified progress section"""
+        progress_frame = tk.Frame(self.content_frame, bg="#1e2329")
+        progress_frame.pack(side="right", padx=12, pady=10)
         
-        # Progress dots
-        self.progress_frame = tk.Frame(loading_frame, bg="#1e2329")
-        self.progress_frame.pack()
-        
+        # FIXED: Simpler progress dots
         self.progress_label = tk.Label(
-            self.progress_frame,
+            progress_frame,
             text="●○○○○",
             bg="#1e2329",
             fg="#ffd93d",
@@ -115,106 +113,81 @@ class LoadingInstanceCard(tk.Frame):
         )
         self.progress_label.pack(pady=(5, 0))
         
-        # Status detail
+        # Simple status detail
         self.detail_label = tk.Label(
-            loading_frame,
-            text="Setting up MEmu...",
+            progress_frame,
+            text="Setting up...",
             bg="#1e2329",
             fg="#8b949e",
             font=("Segoe UI", 8)
         )
         self.detail_label.pack(pady=(5, 0))
     
-    def _start_animations(self):
-        """Start all animations"""
-        self._animate_loading_icon()
-        self._animate_progress_dots()
-        self._animate_border()
-        self._cycle_status_messages()
-    
-    def _animate_loading_icon(self):
-        """Animate the loading icon"""
-        if self._destroyed or not self.animation_running:
+    def _start_optimized_animations(self):
+        """FIXED: Start optimized, non-laggy animations"""
+        if not self.animation_running or self._destroyed:
             return
         
-        icons = ["⚡", "⚙", "🔄", "⭐"]
         try:
-            icon = icons[self.animation_step % len(icons)]
-            self.loading_icon.configure(text=icon)
-            self.after(500, self._animate_loading_icon)
-        except tk.TclError:
-            pass
+            if not self.winfo_exists():
+                return
+            
+            # FIXED: Combined animation update (less frequent calls)
+            self._update_all_animations()
+            
+            # FIXED: Longer delay for smoother performance (800ms)
+            self.animation_id = self.after(800, self._start_optimized_animations)
+            
+        except (tk.TclError, AttributeError):
+            self.animation_running = False
     
-    def _animate_progress_dots(self):
-        """Animate the progress dots"""
-        if self._destroyed or not self.animation_running:
-            return
-        
-        patterns = [
-            "●○○○○", "●●○○○", "●●●○○", "●●●●○", "●●●●●",
-            "○●●●●", "○○●●●", "○○○●●", "○○○○●", "○○○○○"
-        ]
-        
+    def _update_all_animations(self):
+        """FIXED: Update all animations in one call to reduce overhead"""
         try:
+            if self._destroyed or not self.animation_running:
+                return
+            
+            # FIXED: Simple progress animation
+            patterns = ["●○○○○", "○●○○○", "○○●○○", "○○○●○", "○○○○●"]
             pattern = patterns[self.animation_step % len(patterns)]
             self.progress_label.configure(text=pattern)
-            self.after(200, self._animate_progress_dots)
-        except tk.TclError:
-            pass
-    
-    def _animate_border(self):
-        """Animate the border color"""
-        if self._destroyed or not self.animation_running:
-            return
-        
-        colors = ["#ffd93d", "#ffeb3b", "#fff176", "#ffeb3b"]
-        try:
-            color = colors[self.animation_step % len(colors)]
-            self.main_container.configure(bg=color)
-            self.after(300, self._animate_border)
-        except tk.TclError:
-            pass
-    
-    def _cycle_status_messages(self):
-        """Cycle through status messages"""
-        if self._destroyed or not self.animation_running:
-            return
-        
-        messages = [
-            "Creating instance...",
-            "Configuring MEmu...",
-            "Allocating resources...",
-            "Optimizing settings...",
-            "Finalizing setup..."
-        ]
-        
-        details = [
-            "Setting up MEmu...",
-            "Configuring RAM...",
-            "Setting CPU cores...",
-            "Applying settings...",
-            "Almost done..."
-        ]
-        
-        try:
-            msg_index = (self.animation_step // 5) % len(messages)
-            self.status_text.configure(text=messages[msg_index])
-            self.detail_label.configure(text=details[msg_index])
+            
+            # FIXED: Simple icon rotation (less icons, slower change)
+            icons = ["⚡", "⚙"]
+            icon = icons[(self.animation_step // 2) % len(icons)]
+            self.loading_icon.configure(text=icon)
+            
+            # FIXED: Simplified border pulse (only 2 colors)
+            border_colors = ["#ffd93d", "#ffeb3b"]
+            border_color = border_colors[self.animation_step % len(border_colors)]
+            self.main_container.configure(bg=border_color)
+            
+            # FIXED: Less frequent status updates
+            if self.animation_step % 3 == 0:  # Update every 3rd step
+                messages = ["Creating...", "Configuring...", "Optimizing...", "Finalizing..."]
+                details = ["Setting up...", "Allocating RAM...", "Setting CPU...", "Almost done..."]
+                
+                msg_index = (self.animation_step // 3) % len(messages)
+                self.status_text.configure(text=messages[msg_index])
+                self.detail_label.configure(text=details[msg_index])
+            
             self.animation_step += 1
-            self.after(1000, self._cycle_status_messages)
-        except tk.TclError:
-            pass
+            
+        except (tk.TclError, AttributeError):
+            self.animation_running = False
     
     def show_success(self):
-        """Show success state briefly before removal"""
+        """FIXED: Simple success state without complex animations"""
         if self._destroyed:
             return
         
         try:
             # Stop animations
             self.animation_running = False
+            if self.animation_id:
+                self.after_cancel(self.animation_id)
             
-            # Show success state
+            # FIXED: Simple success state (no animations)
             self.main_container.configure(bg="#00ff88")
             self.loading_icon.configure(text="✓", fg="#00ff88")
             self.status_icon.configure(text="✓", fg="#00ff88")
@@ -222,101 +195,60 @@ class LoadingInstanceCard(tk.Frame):
             self.progress_label.configure(text="●●●●●", fg="#00ff88")
             self.detail_label.configure(text="Instance ready!")
             
-            # Animate success
-            self._animate_success_pulse()
+            print(f"[LoadingCard] {self.instance_name} - Success state shown")
             
-        except tk.TclError:
+        except (tk.TclError, AttributeError):
             pass
     
     def show_error(self, error_message="Creation failed"):
-        """Show error state before removal"""
+        """FIXED: Simple error state without animations"""
         if self._destroyed:
             return
         
         try:
             # Stop animations
             self.animation_running = False
+            if self.animation_id:
+                self.after_cancel(self.animation_id)
             
-            # Show error state
+            # FIXED: Simple error state
             self.main_container.configure(bg="#ff6b6b")
             self.loading_icon.configure(text="✗", fg="#ff6b6b")
             self.status_icon.configure(text="✗", fg="#ff6b6b")
             self.status_text.configure(text="Creation failed", fg="#ff6b6b")
             self.progress_label.configure(text="✗✗✗✗✗", fg="#ff6b6b")
-            self.detail_label.configure(text=error_message[:30] + "..." if len(error_message) > 30 else error_message)
             
-            # Animate error shake
-            self._animate_error_shake()
+            # Truncate long error messages
+            display_message = error_message[:25] + "..." if len(error_message) > 25 else error_message
+            self.detail_label.configure(text=display_message)
             
-            # Auto-remove after 5 seconds
-            self.after(5000, self._fade_out_and_remove)
+            print(f"[LoadingCard] {self.instance_name} - Error state shown: {error_message}")
             
-        except tk.TclError:
+            # FIXED: Auto-destroy after delay without animation
+            self.after(3000, self._simple_destroy)
+            
+        except (tk.TclError, AttributeError):
             pass
     
-    def _animate_success_pulse(self):
-        """Pulse animation for success"""
-        def pulse(step=0):
-            if self._destroyed or step > 6:
-                return
-            
-            try:
-                colors = ["#00ff88", "#00cc66", "#00ff88"]
-                color = colors[step % len(colors)]
-                self.main_container.configure(bg=color)
-                self.after(150, lambda: pulse(step + 1))
-            except tk.TclError:
-                pass
-        
-        pulse()
-    
-    def _animate_error_shake(self):
-        """Shake animation for error"""
-        original_x = self.winfo_x()
-        
-        def shake(step=0):
-            if self._destroyed or step > 8:
-                return
-            
-            try:
-                offset = 5 if step % 2 == 0 else -5
-                # Since we can't easily move the frame, we'll use a visual shake effect
-                if step % 2 == 0:
-                    self.configure(bg="#ff4444")
-                else:
-                    self.configure(bg="#1e2329")
-                
-                self.after(100, lambda: shake(step + 1))
-            except tk.TclError:
-                pass
-        
-        shake()
-    
-    def _fade_out_and_remove(self):
-        """Fade out animation before removal"""
-        if self._destroyed:
-            return
-        
-        # Simple fade by changing opacity-like effect
-        fade_colors = ["#ff6b6b", "#cc5555", "#aa4444", "#883333", "#661111", "#441111"]
-        
-        def fade_step(step=0):
-            if self._destroyed or step >= len(fade_colors):
-                self.destroy()
-                return
-            
-            try:
-                self.main_container.configure(bg=fade_colors[step])
-                self.after(100, lambda: fade_step(step + 1))
-            except tk.TclError:
-                self.destroy()
-        
-        fade_step()
+    def _simple_destroy(self):
+        """FIXED: Simple destroy without fade animations"""
+        try:
+            self.destroy()
+        except:
+            pass
     
     def destroy(self):
-        """Clean destroy"""
+        """FIXED: Clean destroy with animation cleanup"""
         self._destroyed = True
         self.animation_running = False
+        
+        # Cancel scheduled animation
+        if self.animation_id:
+            try:
+                self.after_cancel(self.animation_id)
+            except:
+                pass
+        
         super().destroy()
 
 

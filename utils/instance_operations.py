@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - FIXED Instance Operations with Non-blocking Card Animations
-Fixed freezing issues with proper threading and card-based deletion
+BENSON v2.0 - SMOOTH Instance Operations
+Fixed to prevent duplicate cards and enable smooth fade-in animations
 """
 
 import tkinter as tk
@@ -10,507 +10,489 @@ import time
 
 
 class InstanceOperations:
-    """FIXED: Instance operations with non-blocking animations"""
+    """Smooth instance operations with proper card management"""
 
     def __init__(self, app_ref):
         self.app = app_ref
 
     def create_instance_with_name(self, name):
-        """FIXED: Create instance with non-blocking loading card"""
+        """Create instance with smooth animation and no duplicates"""
         if not name or not name.strip():
             self.app.add_console_message("✗ Invalid instance name")
             return
 
         name = name.strip()
-
-        # Import the FIXED loading card component
-        from gui.components.loading_instance_card import create_loading_instance_card
-
-        # Create and show loading card immediately
-        loading_card = create_loading_instance_card(self.app.instances_container, name)
-
-        # Position the loading card
-        current_cards = len(self.app.instance_cards)
-        row = current_cards // 2
-        col = current_cards % 2
-        loading_card.grid(row=row, column=col, padx=4, pady=2, sticky="e" if col == 0 else "w")
-
-        # Add to instance cards list temporarily
-        self.app.instance_cards.append(loading_card)
-
-        # FIXED: Force immediate UI update without blocking
-        self.app.update_idletasks()
-
-        # Log start
+        
+        # Log the start
         self.app.add_console_message(f"🔄 Creating MEmu instance: {name}")
+        
+        # Create loading card immediately
+        try:
+            from gui.components.loading_instance_card import create_loading_instance_card
+            loading_card = create_loading_instance_card(self.app.instances_container, name)
+            
+            # Position it
+            current_cards = len(self.app.instance_cards)
+            row = current_cards // 2
+            col = current_cards % 2
+            loading_card.grid(row=row, column=col, padx=4, pady=2, sticky="e" if col == 0 else "w")
+            
+            # Add to list temporarily
+            self.app.instance_cards.append(loading_card)
+            
+            # Update counter immediately
+            if hasattr(self.app, 'instances_header'):
+                self.app.instances_header.configure(text=f"Instances ({len(self.app.instance_cards)})")
+            
+            # Update UI immediately
+            self.app.update_idletasks()
+            
+            # Update scroll region
+            if hasattr(self.app.ui_manager, 'update_scroll_region'):
+                self.app.ui_manager.update_scroll_region()
+                self.app.after(100, self.app.ui_manager.scroll_to_bottom)
+            
+            print(f"[InstanceOps] ✅ Loading card created for {name}")
+            
+        except Exception as e:
+            print(f"[InstanceOps] ❌ Error creating loading card: {e}")
+            loading_card = None
 
-        def create_worker():
-            """FIXED: Non-blocking creation worker"""
+        # Start creation in background
+        def creation_thread():
+            """Background creation thread"""
             success = False
             error_msg = None
-
+            
             try:
-                # Small delay to let UI render
-                time.sleep(0.1)
-
-                # Call the actual creation method
+                print(f"[InstanceOps] 🔄 Starting background creation for {name}")
+                
+                # This is the slow part - runs in background
                 success = self.app.instance_manager.create_instance_with_name(name)
-
+                
+                print(f"[InstanceOps] ✅ Background creation result: {success}")
+                
             except Exception as e:
+                print(f"[InstanceOps] ❌ Background creation error: {e}")
                 error_msg = str(e)
                 success = False
-
-            # Schedule completion on main thread - FIXED: Non-blocking
-            self.app.after_idle(lambda: self._complete_create_with_loading_card(
+            
+            # Schedule completion on main thread
+            self.app.after(0, lambda: self._handle_creation_completion(
                 name, loading_card, success, error_msg
             ))
+        
+        # Start the background thread
+        thread = threading.Thread(target=creation_thread, daemon=True, name=f"Create-{name}")
+        thread.start()
+        
+        print(f"[InstanceOps] 🚀 Creation thread started for {name}")
 
-        # Start creation in background - FIXED: Daemon thread
-        threading.Thread(target=create_worker, daemon=True).start()
-
-    def _complete_create_with_loading_card(self, name, loading_card, success, error=None):
-        """FIXED: Complete instance creation with proper non-blocking card replacement"""
+    def _handle_creation_completion(self, name, loading_card, success, error_msg):
+        """Handle completion with smooth animation"""
         try:
+            print(f"[InstanceOps] 🎯 Handling completion for {name}, success: {success}")
+            
             if success:
-                # Show success animation
-                loading_card.show_success()
-
-                # Schedule replacement after success animation - FIXED: Non-blocking timing
-                self.app.after(1200, lambda: self._replace_with_real_card(name, loading_card))
-
+                # Show success on loading card
+                if loading_card:
+                    loading_card.show_success()
+                
+                # Wait for success animation, then do SMOOTH replacement
+                self.app.after(1200, lambda: self._smooth_replace_with_real_card(name, loading_card))
+                
             else:
-                # Show error animation
-                error_message = error or "Unknown error occurred"
-                loading_card.show_error(error_message)
-
-                # Remove from list after error - FIXED: Non-blocking cleanup
-                self.app.after(100, lambda: self._remove_failed_card(loading_card))
-
+                # Show error
+                if loading_card:
+                    error_message = error_msg or "Creation failed"
+                    loading_card.show_error(error_message)
+                
+                # Remove loading card after error
+                self.app.after(3000, lambda: self._remove_loading_card(loading_card))
+                
                 # Log error
-                error_msg = f"Failed to create instance: {name}"
-                if error:
-                    error_msg += f" - {error}"
-                self.app.add_console_message(f"❌ {error_msg}")
-
+                self.app.add_console_message(f"❌ Failed to create {name}: {error_msg or 'Unknown error'}")
+                
         except Exception as e:
-            print(f"[InstanceOps] Error in completion handler: {e}")
-            # Cleanup loading card if something goes wrong
-            self._cleanup_loading_card(loading_card)
+            print(f"[InstanceOps] ❌ Error handling completion: {e}")
 
-    def _replace_with_real_card(self, name, loading_card):
-        """FIXED: Replace loading card with real card in non-blocking way"""
+    def _smooth_replace_with_real_card(self, name, loading_card):
+        """SMOOTH: Replace loading card with real card without full refresh"""
         try:
-            # Get loading card position before removing it
-            loading_index = None
+            print(f"[InstanceOps] 🎨 Smooth replacement for {name}")
+            
+            # Get loading card position
+            loading_position = None
             if loading_card in self.app.instance_cards:
-                loading_index = self.app.instance_cards.index(loading_card)
-                self.app.instance_cards.remove(loading_card)
-
-            # Start background refresh to get new instance data
-            def refresh_worker():
+                loading_position = self.app.instance_cards.index(loading_card)
+            
+            # Get fresh instance data (just this instance)
+            def get_new_instance_data():
+                """Background data fetch"""
                 try:
-                    # Refresh instance data
                     self.app.instance_manager.load_real_instances()
-
-                    # Find the new instance
-                    new_instance = self.app.instance_manager.get_instance(name)
-                    if not new_instance:
-                        self.app.after_idle(lambda: self._handle_missing_instance(loading_card, name))
-                        return
-
-                    # Schedule real card creation on main thread
-                    self.app.after_idle(lambda: self._create_real_card_final(
-                        name, new_instance["status"], loading_card, loading_index
+                    instances = self.app.instance_manager.get_instances()
+                    
+                    # Find our new instance
+                    new_instance = None
+                    for instance in instances:
+                        if instance["name"] == name or name in instance["name"] or instance["name"] in name:
+                            new_instance = instance
+                            break
+                    
+                    # Schedule smooth card creation on main thread
+                    self.app.after(0, lambda: self._create_smooth_replacement_card(
+                        new_instance, loading_card, loading_position
                     ))
-
+                    
                 except Exception as e:
-                    print(f"[InstanceOps] Error in refresh worker: {e}")
-                    self.app.after_idle(lambda: self._handle_refresh_error(loading_card, name))
-
-            # Start refresh in background
-            threading.Thread(target=refresh_worker, daemon=True).start()
-
+                    print(f"[InstanceOps] ❌ Error getting instance data: {e}")
+                    # Fallback: remove loading card
+                    self.app.after(0, lambda: self._remove_loading_card(loading_card))
+            
+            # Get data in background
+            threading.Thread(target=get_new_instance_data, daemon=True).start()
+            
         except Exception as e:
-            print(f"[InstanceOps] Error replacing card: {e}")
-            self._cleanup_loading_card(loading_card)
+            print(f"[InstanceOps] ❌ Error in smooth replacement: {e}")
 
-    def _create_real_card_final(self, name, status, loading_card, loading_index):
-        """FIXED: Final step - create real card and cleanup"""
+    def _create_smooth_replacement_card(self, new_instance, loading_card, loading_position):
+        """Create the replacement card with smooth animation"""
         try:
-            # Create the real instance card
-            real_card = self.app.ui_manager.create_instance_card(name, status)
-
-            if real_card:
-                # Insert at correct position
-                if loading_index is not None:
-                    self.app.instance_cards.insert(loading_index, real_card)
-                else:
-                    self.app.instance_cards.append(real_card)
-
+            if not new_instance:
+                print("[InstanceOps] ❌ No new instance found, removing loading card")
+                self._remove_loading_card(loading_card)
+                return
+            
+            print(f"[InstanceOps] 🆕 Creating real card for {new_instance['name']}")
+            
+            # Create the real card
+            real_card = self.app.ui_manager.create_instance_card(
+                new_instance["name"], 
+                new_instance["status"]
+            )
+            
+            if not real_card:
+                print("[InstanceOps] ❌ Failed to create real card")
+                self._remove_loading_card(loading_card)
+                return
+            
+            # Replace loading card with real card
+            if loading_position is not None and loading_position < len(self.app.instance_cards):
+                # Replace at same position
+                self.app.instance_cards[loading_position] = real_card
+                
+                # Position the real card
+                row = loading_position // 2
+                col = loading_position % 2
+                real_card.grid(row=row, column=col, padx=4, pady=2, 
+                             sticky="e" if col == 0 else "w", 
+                             in_=self.app.instances_container)
+                
                 # Destroy loading card
                 loading_card.destroy()
-
-                # FIXED: Schedule layout update to prevent blocking
-                self.app.after_idle(lambda: self._finalize_card_creation(name))
+                
+                # SMOOTH: Add highlight animation to new card
+                self._add_smooth_highlight_animation(real_card, new_instance["name"])
+                
             else:
-                self._handle_card_creation_failure(loading_card, name)
-
+                # Fallback: append to end
+                self.app.instance_cards.append(real_card)
+                self._reposition_all_cards()
+                loading_card.destroy()
+            
+            # Update UI
+            self._update_ui_after_creation(new_instance["name"])
+            
+            print(f"[InstanceOps] ✅ Smooth replacement complete for {new_instance['name']}")
+            
         except Exception as e:
-            print(f"[InstanceOps] Error creating real card: {e}")
-            self._cleanup_loading_card(loading_card)
+            print(f"[InstanceOps] ❌ Error creating replacement card: {e}")
+            self._remove_loading_card(loading_card)
 
-    def _finalize_card_creation(self, name):
-        """FIXED: Finalize card creation with non-blocking updates"""
+    def _add_smooth_highlight_animation(self, card, name):
+        """Add smooth highlight animation to new card"""
         try:
-            # Reposition all cards
-            self.app.reposition_all_cards()
+            print(f"[InstanceOps] ✨ Adding highlight animation for {name}")
+            
+            if not hasattr(card, 'main_container'):
+                return
+            
+            # Start with normal color
+            original_bg = card.main_container.cget("bg")
+            
+            # Animation sequence: normal -> green -> normal
+            def animate_step(step=0):
+                try:
+                    if not card.winfo_exists():
+                        return
+                    
+                    if step == 0:
+                        # Fade to green
+                        card.main_container.configure(bg="#00ff88")
+                        card.after(400, lambda: animate_step(1))
+                    elif step == 1:
+                        # Fade to lighter green
+                        card.main_container.configure(bg="#33ff99")
+                        card.after(200, lambda: animate_step(2))
+                    elif step == 2:
+                        # Fade back to original
+                        card.main_container.configure(bg=original_bg)
+                        print(f"[InstanceOps] ✅ Highlight animation complete for {name}")
+                    
+                except Exception as e:
+                    print(f"[InstanceOps] Animation error: {e}")
+            
+            # Start animation
+            animate_step()
+            
+        except Exception as e:
+            print(f"[InstanceOps] ❌ Error adding animation: {e}")
 
+    def _update_ui_after_creation(self, name):
+        """Update UI after successful creation"""
+        try:
             # Update counter
-            self.app.force_counter_update()
-
-            # Log success
+            if hasattr(self.app, 'instances_header'):
+                count = len([c for c in self.app.instance_cards if hasattr(c, 'name')])
+                self.app.instances_header.configure(text=f"Instances ({count})")
+            
+            # Update scroll region
+            if hasattr(self.app.ui_manager, 'update_scroll_region'):
+                self.app.ui_manager.update_scroll_region()
+            
+            # Success message
             self.app.add_console_message(f"✅ Successfully created MEmu instance: {name}")
-
+            
         except Exception as e:
-            print(f"[InstanceOps] Error finalizing: {e}")
+            print(f"[InstanceOps] ❌ Error updating UI: {e}")
 
-    def _remove_failed_card(self, loading_card):
-        """Remove failed loading card from list"""
+    def _remove_loading_card(self, loading_card):
+        """Remove loading card safely"""
         try:
-            if loading_card in self.app.instance_cards:
+            if loading_card and loading_card in self.app.instance_cards:
                 self.app.instance_cards.remove(loading_card)
-            # Card will destroy itself after error animation
+                loading_card.destroy()
+                
+                # Update counter
+                if hasattr(self.app, 'instances_header'):
+                    count = len(self.app.instance_cards)
+                    self.app.instances_header.configure(text=f"Instances ({count})")
+                    
+                # Update scroll region
+                if hasattr(self.app.ui_manager, 'update_scroll_region'):
+                    self.app.ui_manager.update_scroll_region()
+                    
         except Exception as e:
-            print(f"[InstanceOps] Error removing failed card: {e}")
+            print(f"[InstanceOps] ❌ Error removing loading card: {e}")
 
-    def _cleanup_loading_card(self, loading_card):
-        """Emergency cleanup for loading card"""
+    def _reposition_all_cards(self):
+        """Reposition all cards"""
         try:
-            if loading_card in self.app.instance_cards:
-                self.app.instance_cards.remove(loading_card)
-            loading_card.destroy()
-        except:
-            pass
+            for i, card in enumerate(self.app.instance_cards):
+                if card and card.winfo_exists():
+                    row = i // 2
+                    col = i % 2
+                    card.grid(row=row, column=col, padx=4, pady=2, 
+                            sticky="e" if col == 0 else "w", 
+                            in_=self.app.instances_container)
+        except Exception as e:
+            print(f"[InstanceOps] ❌ Error repositioning cards: {e}")
 
-    def _handle_missing_instance(self, loading_card, name):
-        """Handle case where new instance is not found"""
-        loading_card.show_error("Instance not found after creation")
-        self._remove_failed_card(loading_card)
-        self.app.add_console_message(f"❌ Could not find new instance {name} after creation")
-
-    def _handle_refresh_error(self, loading_card, name):
-        """Handle refresh error during card replacement"""
-        loading_card.show_error("Refresh failed")
-        self._remove_failed_card(loading_card)
-        self.app.add_console_message(f"❌ Failed to refresh instances for {name}")
-
-    def _handle_card_creation_failure(self, loading_card, name):
-        """Handle real card creation failure"""
-        loading_card.show_error("Card creation failed")
-        self._remove_failed_card(loading_card)
-        self.app.add_console_message(f"❌ Failed to create real card for {name}")
-
+    # Delete operations remain the same
     def delete_instance_card_with_animation(self, card):
-        """FIXED: Delete instance with card animation instead of loading overlay"""
+        """Delete instance with animation"""
         result = messagebox.askyesno("Confirm Delete", 
                                    f"Delete instance '{card.name}'?\n\nThis cannot be undone.")
         if not result:
             return
 
-        # Import the deleting card component
-        from gui.components.deleting_instance_card import create_deleting_instance_card
+        try:
+            from gui.components.deleting_instance_card import create_deleting_instance_card
+            
+            # Get card position
+            card_index = None
+            if card in self.app.instance_cards:
+                card_index = self.app.instance_cards.index(card)
 
-        # Get the card's position before replacing it
-        card_index = None
-        if card in self.app.instance_cards:
-            card_index = self.app.instance_cards.index(card)
+            # Create deleting card
+            deleting_card = create_deleting_instance_card(self.app.instances_container, card.name)
 
-        # Create deleting card at same position
-        deleting_card = create_deleting_instance_card(self.app.instances_container, card.name)
+            # Replace original card
+            if card_index is not None:
+                self.app.instance_cards[card_index] = deleting_card
+                row = card_index // 2
+                col = card_index % 2
+                
+                card.destroy()
+                deleting_card.grid(row=row, column=col, padx=4, pady=2, 
+                                 sticky="e" if col == 0 else "w")
+            else:
+                self.app.instance_cards.append(deleting_card)
+                card.destroy()
+                self._reposition_all_cards()
 
-        # Replace the original card with deleting card
-        if card_index is not None:
-            # Remove original card
-            self.app.instance_cards[card_index] = deleting_card
-            row = card_index // 2
-            col = card_index % 2
+            self.app.update_idletasks()
+            self.app.add_console_message(f"🗑 Deleting MEmu instance: {card.name}")
 
-            # Destroy original card
-            card.destroy()
-
-            # Position deleting card
-            deleting_card.grid(row=row, column=col, padx=4, pady=2, 
-                             sticky="e" if col == 0 else "w")
-        else:
-            # Fallback: append and reposition
-            self.app.instance_cards.append(deleting_card)
-            card.destroy()
-            self.app.reposition_all_cards()
-
-        # Update UI
-        self.app.update_idletasks()
-
-        # Log start
-        self.app.add_console_message(f"🗑 Deleting MEmu instance: {card.name}")
-
-        def delete_worker():
-            """FIXED: Non-blocking deletion worker"""
-            success = False
-            error_msg = None
-
-            try:
-                # Small delay for animation to start
-                time.sleep(0.2)
-
-                # Perform actual deletion
-                success = self.app.instance_manager.delete_instance(card.name)
-
-            except Exception as e:
-                error_msg = str(e)
+            # Start deletion in background
+            def deletion_thread():
                 success = False
+                error_msg = None
+                
+                try:
+                    success = self.app.instance_manager.delete_instance(card.name)
+                except Exception as e:
+                    error_msg = str(e)
+                    success = False
+                
+                self.app.after(0, lambda: self._handle_deletion_completion(
+                    card.name, deleting_card, success, error_msg
+                ))
+            
+            threading.Thread(target=deletion_thread, daemon=True, name=f"Delete-{card.name}").start()
+            
+        except Exception as e:
+            print(f"[InstanceOps] ❌ Error in delete operation: {e}")
 
-            # Schedule completion on main thread
-            self.app.after_idle(lambda: self._complete_delete_with_animation(
-                card.name, deleting_card, success, error_msg
-            ))
-
-        # Start deletion in background
-        threading.Thread(target=delete_worker, daemon=True).start()
-
-    def _complete_delete_with_animation(self, name, deleting_card, success, error=None):
-        """FIXED: Complete deletion with animation"""
+    def _handle_deletion_completion(self, name, deleting_card, success, error_msg):
+        """Handle deletion completion"""
         try:
             if success:
-                # Show success animation
                 deleting_card.show_success()
-
-                # Schedule cleanup after success animation
                 self.app.after(2000, lambda: self._finalize_deletion(name, deleting_card))
-
             else:
-                # Show error animation
-                error_message = error or "Deletion failed"
-                deleting_card.show_error(error_message)
-
-                # Log error
-                self.app.add_console_message(f"❌ Failed to delete {name}: {error_message}")
-
-                # Keep error card visible longer, then remove
+                deleting_card.show_error(error_msg or "Deletion failed")
+                self.app.add_console_message(f"❌ Failed to delete {name}: {error_msg}")
                 self.app.after(5000, lambda: self._cleanup_deleting_card(deleting_card))
-
+                
         except Exception as e:
-            print(f"[InstanceOps] Error in delete completion: {e}")
-            self._cleanup_deleting_card(deleting_card)
+            print(f"[InstanceOps] ❌ Error handling deletion completion: {e}")
 
     def _finalize_deletion(self, name, deleting_card):
-        """FIXED: Finalize deletion and cleanup"""
+        """Finalize deletion"""
         try:
-            # Remove deleting card from list
             if deleting_card in self.app.instance_cards:
                 self.app.instance_cards.remove(deleting_card)
-
-            # Card will destroy itself after fade animation
-
-            # Refresh instance list
-            self.app.after_idle(lambda: self._refresh_after_deletion(name))
-
-        except Exception as e:
-            print(f"[InstanceOps] Error finalizing deletion: {e}")
-
-    def _refresh_after_deletion(self, name):
-        """Refresh UI after deletion"""
-        try:
-            # Reposition remaining cards
-            self.app.reposition_all_cards()
-
-            # Update counter
-            self.app.force_counter_update()
-
-            # Log success
+            
+            self._reposition_all_cards()
+            self._update_counter()
+            
             self.app.add_console_message(f"✅ Successfully deleted instance: {name}")
-
+            
         except Exception as e:
-            print(f"[InstanceOps] Error refreshing after deletion: {e}")
+            print(f"[InstanceOps] ❌ Error finalizing deletion: {e}")
 
     def _cleanup_deleting_card(self, deleting_card):
-        """Emergency cleanup for deleting card"""
+        """Cleanup deleting card"""
         try:
             if deleting_card in self.app.instance_cards:
                 self.app.instance_cards.remove(deleting_card)
             deleting_card.destroy()
-
-            # Reposition cards
-            self.app.reposition_all_cards()
-            self.app.force_counter_update()
-
+            self._reposition_all_cards()
+            self._update_counter()
         except:
             pass
 
-    def delete_selected_instances_with_animation(self):
-        """FIXED: Delete multiple instances with individual card animations"""
-        selected_cards = [card for card in self.app.instance_cards if card.selected]
-        if not selected_cards:
-            self.app.add_console_message("No instances selected for deletion")
-            return
+    def _update_counter(self):
+        """Update instance counter"""
+        try:
+            if hasattr(self.app, 'instances_header'):
+                count = len(self.app.instance_cards)
+                self.app.instances_header.configure(text=f"Instances ({count})")
+        except Exception as e:
+            print(f"[InstanceOps] ❌ Error updating counter: {e}")
 
-        result = messagebox.askyesno("Confirm Delete", 
-                                   f"Delete {len(selected_cards)} selected instances?\n\nThis cannot be undone.")
-        if not result:
-            return
-
-        self.app.add_console_message(f"🗑 Deleting {len(selected_cards)} selected instances...")
-
-        # Delete each card with staggered timing
-        for i, card in enumerate(selected_cards):
-            # Stagger deletions to prevent overwhelming the system
-            delay = i * 200  # 200ms between each deletion start
-            self.app.after(delay, lambda c=card: self.delete_instance_card_with_animation(c))
-
-    # Legacy method compatibility
-    def delete_instance_card_with_loading(self, card):
-        """Legacy method - redirects to animation version"""
-        self.delete_instance_card_with_animation(card)
-
-    def delete_selected_instances_with_loading(self):
-        """Legacy method - redirects to animation version"""
-        self.delete_selected_instances_with_animation()
-
-    # Other methods remain the same but with FIXED threading
-    def create_instance(self):
-        """Legacy create instance method (fallback)"""
-        name = simpledialog.askstring("Create MEmu Instance", 
-                                     "Enter MEmu instance name:\n(e.g., MyGame, Instance1, etc.)")
-
-        if name:
-            self.create_instance_with_name(name)
-        else:
-            self.app.add_console_message("Instance creation cancelled")
-
-    def clone_selected_instance(self):
-        """Clone the selected instance"""
-        selected_cards = [card for card in self.app.instance_cards if card.selected]
-        if not selected_cards:
-            self.app.add_console_message("No instance selected for cloning")
-            return
-
-        self.app.add_console_message("Clone functionality coming soon...")
-
-    def start_selected_instances(self):
-        """FIXED: Start selected instances (non-blocking)"""
-        selected_cards = [card for card in self.app.instance_cards if card.selected]
-        if not selected_cards:
-            self.app.add_console_message("No instances selected")
-            return
-
-        self.app.add_console_message(f"Starting {len(selected_cards)} selected instances...")
-
-        def start_worker():
-            for i, card in enumerate(selected_cards):
-                # Stagger starts to prevent system overload
-                time.sleep(i * 0.5)
-
-                # Schedule on main thread
-                self.app.after_idle(lambda name=card.name: self._start_instance_async(name))
-
-        threading.Thread(target=start_worker, daemon=True).start()
-
-    def stop_selected_instances(self):
-        """FIXED: Stop selected instances (non-blocking)"""
-        selected_cards = [card for card in self.app.instance_cards if card.selected]
-        if not selected_cards:
-            self.app.add_console_message("No instances selected")
-            return
-
-        self.app.add_console_message(f"Stopping {len(selected_cards)} selected instances...")
-
-        def stop_worker():
-            for i, card in enumerate(selected_cards):
-                # Stagger stops
-                time.sleep(i * 0.3)
-
-                # Schedule on main thread
-                self.app.after_idle(lambda name=card.name: self._stop_instance_async(name))
-
-        threading.Thread(target=stop_worker, daemon=True).start()
-
-    def _start_instance_async(self, name):
-        """Start instance asynchronously"""
-        def start_worker():
+    # Simple operations
+    def start_instance(self, name):
+        """Start instance (non-blocking)"""
+        def start_thread():
             try:
                 success = self.app.instance_manager.start_instance(name)
-                message = f"Starting instance: {name}" if success else f"Failed to start instance: {name}"
-                self.app.after_idle(lambda: self.app.add_console_message(message))
+                message = f"✅ Started: {name}" if success else f"❌ Failed to start: {name}"
+                self.app.after(0, lambda: self.app.add_console_message(message))
             except Exception as e:
-                self.app.after_idle(lambda: self.app.add_console_message(f"Error starting {name}: {str(e)}"))
-
-        threading.Thread(target=start_worker, daemon=True).start()
-
-    def _stop_instance_async(self, name):
-        """Stop instance asynchronously"""
-        def stop_worker():
-            try:
-                success = self.app.instance_manager.stop_instance(name)
-                message = f"Stopping instance: {name}" if success else f"Failed to stop instance: {name}"
-                self.app.after_idle(lambda: self.app.add_console_message(message))
-            except Exception as e:
-                self.app.after_idle(lambda: self.app.add_console_message(f"Error stopping {name}: {str(e)}"))
-
-        threading.Thread(target=stop_worker, daemon=True).start()
-
-    def start_instance(self, name):
-        """Start an instance (non-blocking)"""
-        self._start_instance_async(name)
+                self.app.after(0, lambda: self.app.add_console_message(f"❌ Error starting {name}: {e}"))
+        
+        threading.Thread(target=start_thread, daemon=True).start()
 
     def stop_instance(self, name):
-        """Stop an instance (non-blocking)"""
-        self._stop_instance_async(name)
+        """Stop instance (non-blocking)"""
+        def stop_thread():
+            try:
+                success = self.app.instance_manager.stop_instance(name)
+                message = f"✅ Stopped: {name}" if success else f"❌ Failed to stop: {name}"
+                self.app.after(0, lambda: self.app.add_console_message(message))
+            except Exception as e:
+                self.app.after(0, lambda: self.app.add_console_message(f"❌ Error stopping {name}: {e}"))
+        
+        threading.Thread(target=stop_thread, daemon=True).start()
 
+    def refresh_instances(self):
+        """Refresh instances (non-blocking)"""
+        self.app.add_console_message("Refreshing instances...")
+        
+        def refresh_thread():
+            try:
+                self.app.instance_manager.refresh_instances()
+                self.app.after(0, lambda: self.app.load_instances())
+                self.app.after(0, lambda: self.app.add_console_message("✅ Refresh complete"))
+            except Exception as e:
+                self.app.after(0, lambda: self.app.add_console_message(f"❌ Refresh error: {e}"))
+        
+        threading.Thread(target=refresh_thread, daemon=True).start()
+
+    # Selection operations
     def toggle_select_all(self):
         """Toggle selection of all instances"""
         if not self.app.instance_cards:
             return
 
-        all_selected = all(card.selected for card in self.app.instance_cards)
+        all_selected = all(getattr(card, 'selected', False) for card in self.app.instance_cards 
+                          if hasattr(card, 'selected'))
 
-        if all_selected:
-            for card in self.app.instance_cards:
-                if card.selected:
-                    card.toggle_checkbox()
-            self.app.add_console_message("All instances unselected")
-        else:
-            for card in self.app.instance_cards:
-                if not card.selected:
-                    card.toggle_checkbox()
-            self.app.add_console_message("All instances selected")
-
-    def select_all_instances(self):
-        """Select all instances"""
         for card in self.app.instance_cards:
-            if not card.selected:
-                card.toggle_checkbox()
-        self.app.add_console_message("All instances selected")
+            if hasattr(card, 'toggle_checkbox') and hasattr(card, 'selected'):
+                if all_selected and card.selected:
+                    card.toggle_checkbox()
+                elif not all_selected and not card.selected:
+                    card.toggle_checkbox()
 
-    def refresh_instances(self):
-        """FIXED: Refresh all instances (non-blocking)"""
-        self.app.add_console_message("Refreshing all instances from MEmu...")
+        message = "All instances unselected" if all_selected else "All instances selected"
+        self.app.add_console_message(message)
 
-        def refresh_worker():
-            try:
-                # Small delay to let UI update
-                time.sleep(0.5)
+    def start_selected_instances(self):
+        """Start selected instances"""
+        selected = [card for card in self.app.instance_cards 
+                   if hasattr(card, 'selected') and hasattr(card, 'name') and card.selected]
+        
+        if not selected:
+            self.app.add_console_message("No instances selected")
+            return
+        
+        for card in selected:
+            self.start_instance(card.name)
 
-                # Refresh instances
-                self.app.instance_manager.refresh_instances()
+    def stop_selected_instances(self):
+        """Stop selected instances"""
+        selected = [card for card in self.app.instance_cards 
+                   if hasattr(card, 'selected') and hasattr(card, 'name') and card.selected]
+        
+        if not selected:
+            self.app.add_console_message("No instances selected")
+            return
+        
+        for card in selected:
+            self.stop_instance(card.name)
 
-                instance_count = len(self.app.instance_manager.get_instances())
+    # Legacy compatibility
+    def delete_instance_card_with_loading(self, card):
+        self.delete_instance_card_with_animation(card)
 
-                # Schedule UI updates on main thread
-                self.app.after_idle(lambda: [
-                    self.app.load_instances(),
-                    self.app.force_counter_update(),
-                    self.app.add_console_message(f"Refreshed {instance_count} instances from MEmu")
-                ])
-            except Exception as e:
-                self.app.after_idle(lambda e=e: self.app.add_console_message(f"Refresh error: {str(e)}"))
+    def create_instance(self):
+        name = simpledialog.askstring("Create Instance", "Enter instance name:")
+        if name:
+            self.create_instance_with_name(name)
 
-        threading.Thread(target=refresh_worker, daemon=True).start()
+    def clone_selected_instance(self):
+        self.app.add_console_message("Clone functionality coming soon...")
