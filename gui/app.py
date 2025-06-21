@@ -20,11 +20,22 @@ class BensonApp(tk.Tk):
 
         print("[BensonApp] Initializing application...")
 
-        # Configure window
+        # Configure window but DON'T show it yet
         self.title("BENSON v2.0 - Advanced Edition")
         self.geometry("1200x800")
         self.configure(bg="#0a0e16")
         self.minsize(900, 600)
+        
+        # Center window but keep it hidden
+        self.update_idletasks()
+        width = 1200
+        height = 800
+        x = (self.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.winfo_screenheight() // 2) - (height // 2)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        
+        # Keep window hidden during initialization
+        self.withdraw()
         
         # Initialize variables
         self.instance_cards = []
@@ -39,234 +50,168 @@ class BensonApp(tk.Tk):
         self.search_var = tk.StringVar()
         self.search_entry = None
 
-        # Show main window immediately
-        self.center_window()
-        self.deiconify()
-
-        # Create WORKING loading overlay with VISIBLE animation
-        self.loading = self._create_visible_loading()
+        # Create a temporary window just for the loading screen
+        self.temp_window = tk.Toplevel()
+        self.temp_window.withdraw()  # Hide it initially
+        
+        # Create simple loading overlay
+        self.loading = self._create_simple_loading()
         
         # Start initialization
-        self.after(50, self.initialize_background)
+        self.after(100, self.initialize_background)
 
-    def _create_visible_loading(self):
-        """Create loading overlay with GUARANTEED visible animation"""
+    def _create_simple_loading(self):
+        """Create a compact, professional loading dialog"""
         
-        class VisibleLoadingOverlay:
-            def __init__(self, parent):
-                self.parent = parent
-                self.overlay_frame = None
-                self.animation_running = True
+        # Create loading window
+        loading_window = tk.Toplevel(self)
+        loading_window.title("BENSON v2.0")
+        loading_window.configure(bg="#1a1f2e")
+        loading_window.attributes('-topmost', True)
+        loading_window.resizable(False, False)
+        
+        # Make it a small, compact window
+        window_width = 400
+        window_height = 300
+        loading_window.update_idletasks()
+        screen_width = loading_window.winfo_screenwidth()
+        screen_height = loading_window.winfo_screenheight()
+        x = (screen_width // 2) - (window_width // 2)
+        y = (screen_height // 2) - (window_height // 2)
+        loading_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        
+        # Keep window decorations but make it non-resizable
+        # loading_window.overrideredirect(True)  # Removed this line
+        
+        # Main container with border
+        main_container = tk.Frame(loading_window, bg="#00d4ff", bd=2, relief="solid")
+        main_container.pack(fill="both", expand=True, padx=2, pady=2)
+        
+        # Content frame
+        content_frame = tk.Frame(main_container, bg="#1a1f2e")
+        content_frame.pack(fill="both", expand=True, padx=2, pady=2)
+        
+        # Logo - smaller and more appropriate
+        logo = tk.Label(content_frame, text="⚡", bg="#1a1f2e", fg="#00d4ff", 
+                       font=("Segoe UI", 48, "bold"))
+        logo.pack(pady=(30, 15))
+        
+        # Title
+        title = tk.Label(content_frame, text="BENSON v2.0", bg="#1a1f2e", fg="#ffffff",
+                        font=("Segoe UI", 20, "bold"))
+        title.pack(pady=(0, 8))
+        
+        # Subtitle
+        subtitle = tk.Label(content_frame, text="MEmu Instance Manager", bg="#1a1f2e", fg="#00d4ff",
+                           font=("Segoe UI", 11))
+        subtitle.pack(pady=(0, 25))
+        
+        # Progress bar container
+        progress_container = tk.Frame(content_frame, bg="#1a1f2e")
+        progress_container.pack(pady=(0, 15))
+        
+        # Simple progress bar
+        progress_bg = tk.Frame(progress_container, bg="#2a2f3e", height=6, width=200)
+        progress_bg.pack()
+        
+        progress_canvas = tk.Canvas(progress_bg, width=200, height=6, bg="#2a2f3e", 
+                                   highlightthickness=0, bd=0)
+        progress_canvas.pack()
+        
+        # Status label
+        status_label = tk.Label(content_frame, text="🚀 Initializing...", bg="#1a1f2e", fg="#ffffff",
+                               font=("Segoe UI", 12, "bold"))
+        status_label.pack(pady=(0, 10))
+        
+        # Progress dots
+        dots_label = tk.Label(content_frame, text="●●●", bg="#1a1f2e", fg="#00d4ff",
+                             font=("Segoe UI", 14))
+        dots_label.pack()
+        
+        # Footer
+        footer = tk.Label(content_frame, text="Loading...",
+                         bg="#1a1f2e", fg="#6b7280", font=("Segoe UI", 9))
+        footer.pack(side="bottom", pady=(15, 10))
+        
+        # Show window
+        loading_window.deiconify()
+        loading_window.lift()
+        loading_window.focus_force()
+        
+        # Simple, clean loading controller
+        class CompactLoadingController:
+            def __init__(self, window, status_label, dots_label, progress_canvas):
+                self.window = window
+                self.status_label = status_label
+                self.dots_label = dots_label
+                self.progress_canvas = progress_canvas
                 self.animation_step = 0
                 self.animation_id = None
-                self.status_label = None
-                self.progress_label = None
-                self.logo_label = None
-                self.dots_label = None
-                
-                print("[LoadingOverlay] 🎬 Creating VISIBLE loading overlay...")
-                self._create_overlay()
-                # Start animation immediately
-                self.parent.after(1, self._start_visible_animation)
+                self.running = True
+                self._start_animation()
             
-            def _create_overlay(self):
-                """Create overlay with guaranteed visible elements"""
-                try:
-                    # Full screen overlay
-                    self.overlay_frame = tk.Frame(self.parent, bg="#0a0e16")
-                    self.overlay_frame.place(x=0, y=0, relwidth=1, relheight=1)
-                    
-                    # Center container
-                    center_frame = tk.Frame(self.overlay_frame, bg="#1e2329", relief="solid", bd=3)
-                    center_frame.place(relx=0.5, rely=0.5, anchor="center", width=500, height=400)
-                    
-                    # Content
-                    content = tk.Frame(center_frame, bg="#1e2329")
-                    content.pack(fill="both", expand=True, padx=40, pady=35)
-                    
-                    # LARGE animated logo
-                    self.logo_label = tk.Label(
-                        content,
-                        text="🎯",
-                        bg="#1e2329",
-                        fg="#00d4ff",
-                        font=("Segoe UI", 80)  # HUGE
-                    )
-                    self.logo_label.pack(pady=(0, 20))
-                    
-                    # Title
-                    title = tk.Label(
-                        content,
-                        text="BENSON v2.0",
-                        bg="#1e2329",
-                        fg="#ffffff",
-                        font=("Segoe UI", 32, "bold")
-                    )
-                    title.pack(pady=(0, 10))
-                    
-                    # Subtitle
-                    subtitle = tk.Label(
-                        content,
-                        text="Advanced Edition",
-                        bg="#1e2329",
-                        fg="#00d4ff", 
-                        font=("Segoe UI", 16)
-                    )
-                    subtitle.pack(pady=(0, 30))
-                    
-                    # Status
-                    self.status_label = tk.Label(
-                        content,
-                        text="Initializing...",
-                        bg="#1e2329",
-                        fg="#ffffff",
-                        font=("Segoe UI", 18, "bold")
-                    )
-                    self.status_label.pack(pady=(0, 20))
-                    
-                    # HUGE progress dots
-                    self.progress_label = tk.Label(
-                        content,
-                        text="●○○○○",
-                        bg="#1e2329",
-                        fg="#00d4ff",
-                        font=("Segoe UI", 28, "bold")  # HUGE
-                    )
-                    self.progress_label.pack(pady=(0, 15))
-                    
-                    # Extra animated dots
-                    self.dots_label = tk.Label(
-                        content,
-                        text="...",
-                        bg="#1e2329",
-                        fg="#8b949e",
-                        font=("Segoe UI", 20)
-                    )
-                    self.dots_label.pack()
-                    
-                    # Footer
-                    footer = tk.Label(
-                        content,
-                        text="MEmu Instance Manager",
-                        bg="#1e2329",
-                        fg="#6b7280",
-                        font=("Segoe UI", 12)
-                    )
-                    footer.pack(side="bottom", pady=(25, 0))
-                    
-                    # Force to top and update
-                    self.overlay_frame.lift()
-                    self.overlay_frame.tkraise()
-                    self.parent.update()
-                    
-                    print("[LoadingOverlay] ✅ Visible overlay created")
-                    
-                except Exception as e:
-                    print(f"[LoadingOverlay] ❌ Error creating overlay: {e}")
-            
-            def _start_visible_animation(self):
-                """Start GUARANTEED visible animation"""
-                if not self.animation_running:
+            def _start_animation(self):
+                if not self.running or not self.window.winfo_exists():
                     return
                 
                 try:
-                    # Check widgets exist
-                    if not (self.overlay_frame and self.overlay_frame.winfo_exists()):
-                        return
+                    # Simple dots animation
+                    dot_patterns = ["●○○", "○●○", "○○●", "●●○", "●●●", "○○○"]
+                    pattern = dot_patterns[self.animation_step % len(dot_patterns)]
+                    self.dots_label.configure(text=pattern)
                     
-                    if not (self.progress_label and self.progress_label.winfo_exists()):
-                        return
-                    
-                    # Progress animation
-                    progress_patterns = [
-                        "●○○○○", "○●○○○", "○○●○○", "○○○●○", "○○○○●",
-                        "○○○●○", "○○●○○", "○●○○○"
-                    ]
-                    
-                    progress = progress_patterns[self.animation_step % len(progress_patterns)]
-                    self.progress_label.configure(text=progress)
-                    
-                    # Logo color animation (dramatic)
-                    if self.logo_label and self.logo_label.winfo_exists():
-                        logo_colors = ["#00d4ff", "#00ff88", "#ffdd00", "#ff6b6b"]
-                        logo_color = logo_colors[self.animation_step % len(logo_colors)]
-                        self.logo_label.configure(fg=logo_color)
-                    
-                    # Dots animation
-                    if self.dots_label and self.dots_label.winfo_exists():
-                        dots_patterns = [".", "..", "...", "..", "."]
-                        dots = dots_patterns[self.animation_step % len(dots_patterns)]
-                        self.dots_label.configure(text=dots)
+                    # Simple progress bar animation
+                    self.progress_canvas.delete("all")
+                    progress_width = (self.animation_step % 40) * 5  # 0 to 200
+                    if progress_width > 0:
+                        self.progress_canvas.create_rectangle(0, 0, progress_width, 6, 
+                                                            fill="#00d4ff", outline="")
                     
                     self.animation_step += 1
-                    
-                    # FORCE immediate visual update
-                    try:
-                        self.progress_label.update()
-                        if self.logo_label:
-                            self.logo_label.update()
-                        if self.dots_label:
-                            self.dots_label.update()
-                        self.parent.update_idletasks()
-                    except:
-                        pass
-                    
-                    # Schedule next frame (250ms for smooth visible animation)
-                    if self.animation_running:
-                        self.animation_id = self.parent.after(250, self._start_visible_animation)
-                    
-                    print(f"[LoadingOverlay] 🎬 Animation frame {self.animation_step}: {progress}")
-                    
-                except Exception as e:
-                    print(f"[LoadingOverlay] ❌ Animation error: {e}")
-                    self.animation_running = False
+                    self.animation_id = self.window.after(300, self._start_animation)
+                except:
+                    self.running = False
             
             def update_status(self, status_text):
-                """Update status with FORCED visibility"""
                 try:
-                    if self.status_label and self.status_label.winfo_exists():
-                        self.status_label.configure(text=status_text)
-                        # FORCE immediate updates
-                        self.status_label.update_idletasks()
-                        self.status_label.update()
-                        self.parent.update_idletasks()
-                        self.parent.update()
-                        print(f"[LoadingOverlay] 📝 Status: {status_text}")
-                except Exception as e:
-                    print(f"[LoadingOverlay] ❌ Status error: {e}")
+                    if self.status_label.winfo_exists():
+                        status_icons = {
+                            "connecting": "🔗", "loading": "📦", "initializing": "⚙️",
+                            "setting up": "🛠️", "building": "🏗️", "creating": "🎯",
+                            "console": "📝", "finishing": "🎉", "ready": "✨",
+                            "finalizing": "✨"
+                        }
+                        
+                        icon = "🚀"
+                        for key, emoji in status_icons.items():
+                            if key in status_text.lower():
+                                icon = emoji
+                                break
+                        
+                        # Truncate long status messages
+                        if len(status_text) > 25:
+                            status_text = status_text[:22] + "..."
+                        
+                        formatted_status = f"{icon} {status_text}"
+                        self.status_label.configure(text=formatted_status)
+                        print(f"[LoadingOverlay] 📝 Status: {formatted_status}")
+                except:
+                    pass
             
             def close(self):
-                """Close overlay"""
                 try:
                     print("[LoadingOverlay] 🔄 Closing overlay...")
-                    
-                    # Stop animation
-                    self.animation_running = False
-                    
-                    # Cancel animation
+                    self.running = False
                     if self.animation_id:
-                        try:
-                            self.parent.after_cancel(self.animation_id)
-                        except:
-                            pass
-                    
-                    # Destroy overlay
-                    if self.overlay_frame and self.overlay_frame.winfo_exists():
-                        self.overlay_frame.destroy()
-                    
-                    # Clear references
-                    self.overlay_frame = None
-                    self.status_label = None
-                    self.progress_label = None
-                    self.logo_label = None
-                    self.dots_label = None
-                    
+                        self.window.after_cancel(self.animation_id)
+                    if self.window.winfo_exists():
+                        self.window.destroy()
                     print("[LoadingOverlay] ✅ Overlay closed")
-                    
-                except Exception as e:
-                    print(f"[LoadingOverlay] ❌ Close error: {e}")
+                except:
+                    pass
         
-        return VisibleLoadingOverlay(self)
+        print("[LoadingOverlay] ✅ Compact loading dialog created")
+        return CompactLoadingController(loading_window, status_label, dots_label, progress_canvas)
 
     def initialize_background(self):
         """Initialize with proper status updates"""
@@ -274,7 +219,7 @@ class BensonApp(tk.Tk):
             try:
                 # Step 1: Create InstanceManager
                 self._safe_update_status("Connecting to MEmu...")
-                time.sleep(0.8)  # Longer delay to see animation
+                time.sleep(1.0)  # Longer delay to see animation
 
                 self.instance_manager = InstanceManager()
                 self.instance_manager.app = self
@@ -282,7 +227,7 @@ class BensonApp(tk.Tk):
 
                 # Step 2: Load instances
                 self._safe_update_status("Loading MEmu instances...")
-                time.sleep(0.8)
+                time.sleep(1.0)
 
                 self.instance_manager.load_real_instances()
                 instances_count = len(self.instance_manager.get_instances())
@@ -290,7 +235,7 @@ class BensonApp(tk.Tk):
 
                 # Step 3: Initialize modules
                 self._safe_update_status("Initializing modules...")
-                time.sleep(0.8)
+                time.sleep(1.0)
 
                 self.module_manager = ModuleManager(self)
                 self.module_manager.initialize_modules()
@@ -298,7 +243,7 @@ class BensonApp(tk.Tk):
 
                 # Step 4: Setup utilities
                 self._safe_update_status("Setting up utilities...")
-                time.sleep(0.8)
+                time.sleep(1.0)
 
                 # Import here to avoid circular imports
                 from utils.instance_operations import InstanceOperations
@@ -324,7 +269,7 @@ class BensonApp(tk.Tk):
         """Safely update loading status"""
         try:
             self.after(0, lambda: self.loading.update_status(status))
-            time.sleep(0.2)  # Give time for UI to update
+            time.sleep(0.3)  # Give time for UI to update
         except Exception as e:
             print(f"[Init] Error updating status: {e}")
 
@@ -343,13 +288,15 @@ class BensonApp(tk.Tk):
             
             print("[BensonApp] UI setup complete")
 
-            # Add initial console messages
-            self.add_console_message("BENSON v2.0 Advanced Edition started")
+            # Add initial console messages AFTER UI is set up
+            print("[BensonApp] Adding initial console messages...")
+            self.add_console_message("BENSON v2.0 started")
             self.add_console_message(f"Loaded {instances_count} MEmu instances")
+            print("[BensonApp] Initial console messages added")
 
-            # Finalize
-            self.loading.update_status("Finalizing...")
-            self.after(500, lambda: self.finalize_and_show(instances_count))
+            # Finalize - start card loading process
+            self.loading.update_status("Creating instance cards...")
+            self.after(300, lambda: self.finalize_and_show(instances_count))
 
         except Exception as e:
             print(f"[BensonApp] UI setup error: {e}")
@@ -358,11 +305,190 @@ class BensonApp(tk.Tk):
     def finalize_and_show(self, instances_count):
         """Finalize and show main window"""
         try:
-            # Load instance cards
-            self.load_instance_cards_simple()
+            # Start loading instance cards with progress tracking
+            self.loading.update_status("Creating instance cards...")
+            self._load_cards_with_progress(instances_count)
+            
+        except Exception as e:
+            print(f"[Finalize] Error: {e}")
+            self.show_init_error(str(e))
+
+    def _load_cards_with_progress(self, instances_count):
+        """Load cards with progress updates"""
+        try:
+            print("[BensonApp] Starting card creation with progress tracking...")
+            instances = self.instance_manager.get_instances()
+            
+            if not instances:
+                print("[BensonApp] No instances to load")
+                self.loading.update_status("No instances found")
+                self.after(1000, lambda: self._complete_finalization(0))
+                return
+            
+            # Start loading cards one by one with progress
+            self._load_next_card(instances, 0, instances_count)
+            
+        except Exception as e:
+            print(f"[LoadCardsProgress] Error: {e}")
+            self.show_init_error(str(e))
+
+    def _load_next_card(self, instances, index, total_instances):
+        """Load cards one by one with progress updates"""
+        try:
+            if index >= len(instances):
+                # All cards loaded, finalize
+                print(f"[BensonApp] All {len(self.instance_cards)} cards loaded successfully")
+                self.loading.update_status("All cards loaded! Finalizing...")
+                
+                # Configure grid
+                if hasattr(self, 'instances_container') and self.instance_cards:
+                    self.instances_container.grid_columnconfigure(0, weight=1, minsize=580)
+                    self.instances_container.grid_columnconfigure(1, weight=1, minsize=580)
+                
+                # Update scroll region
+                if hasattr(self.ui_manager, 'update_scroll_region'):
+                    self.ui_manager.update_scroll_region()
+                
+                # Update counter
+                if hasattr(self, 'instances_header'):
+                    self.instances_header.configure(text=f"Instances ({len(self.instance_cards)})")
+                
+                # Force final UI update
+                self.update_idletasks()
+                self.update()
+                
+                # Complete after short delay to ensure UI is ready
+                self.after(500, lambda: self._complete_finalization(total_instances))
+                return
+            
+            # Load current card
+            instance = instances[index]
+            name = instance["name"]
+            status = instance["status"]
+            
+            # Update progress
+            progress = f"Creating cards... ({index + 1}/{len(instances)})"
+            self.loading.update_status(progress)
+            print(f"[BensonApp] Creating card {index + 1}/{len(instances)}: {name}")
+            
+            # Create the card
+            card = self.ui_manager.create_instance_card(name, status)
+            if card:
+                self.instance_cards.append(card)
+                
+                # Grid placement
+                row = index // 2
+                col = index % 2
+                card.grid(row=row, column=col, padx=4, pady=2, 
+                        sticky="e" if col == 0 else "w", 
+                        in_=self.instances_container)
+                
+                # Force immediate update
+                card.update_idletasks()
+                self.update_idletasks()
+                
+                print(f"[BensonApp] Card {index + 1} created and placed: {name}")
+            
+            # Schedule next card creation (with small delay for smooth loading)
+            self.after(150, lambda: self._load_next_card(instances, index + 1, total_instances))
+            
+        except Exception as e:
+            print(f"[LoadNextCard] Error at index {index}: {e}")
+            # Continue with next card even if one fails
+            self.after(100, lambda: self._load_next_card(instances, index + 1, total_instances))
+
+    def _complete_finalization(self, instances_count):
+        """Complete the finalization process"""
+        try:
+            print(f"[BensonApp] Completing finalization with {instances_count} instances")
+            
+            # Show finalizing status
+            self.loading.update_status("Setting up console...")
+            
+            # Ensure console is ready and add messages
+            self._ensure_console_ready_and_add_messages(instances_count)
+            
+        except Exception as e:
+            print(f"[CompleteFinalization] Error: {e}")
+            # Fallback - close loading anyway
+            self.after(1000, self._close_loading_and_show)
+
+    def _ensure_console_ready_and_add_messages(self, instances_count):
+        """Ensure console is ready and add final messages"""
+        try:
+            # Check if console exists and is ready
+            if not hasattr(self, 'console_text') or not self.console_text:
+                print("[Console] Console not ready yet, waiting...")
+                self.after(200, lambda: self._ensure_console_ready_and_add_messages(instances_count))
+                return
+            
+            # Force console to be ready
+            try:
+                self.console_text.update_idletasks()
+                print("[Console] Console widget is ready")
+            except:
+                print("[Console] Console widget not accessible yet, waiting...")
+                self.after(200, lambda: self._ensure_console_ready_and_add_messages(instances_count))
+                return
+            
+            # Add the missing console messages that should have been added earlier
+            print("[Console] Adding final console messages...")
+            self.add_console_message(f"✅ BENSON v2.0 ready with {instances_count} instances")
+            
+            # Force console update
+            self.console_text.update_idletasks()
+            self.console_text.update()
+            
+            # Force UI updates
+            self.update_idletasks()
+            self.update()
+            
+            print("[Console] Console messages added successfully")
+            
+            # Now wait for UI to render the console
+            self.after(600, lambda: self._show_ready_and_close(instances_count))
+            
+        except Exception as e:
+            print(f"[ConsoleReady] Error: {e}")
+            # Fallback
+            self.after(1000, self._close_loading_and_show)
+
+    def _show_ready_and_close(self, instances_count):
+        """Show ready status and close loading"""
+        try:
+            print("[Console] Showing ready status and preparing to close")
+            
+            # Show final ready status
+            self.loading.update_status("Console ready! Finishing...")
+            
+            # Force one more update to ensure console is visible
+            self.update_idletasks()
+            self.update()
+            
+            # Wait longer for user to see everything is ready
+            self.after(1200, self._close_loading_and_show)
+            
+        except Exception as e:
+            print(f"[ShowReady] Error: {e}")
+            self.after(500, self._close_loading_and_show)
+
+    def _close_loading_and_show(self):
+        """Close loading and show main window"""
+        try:
+            print("[BensonApp] Closing loading screen and showing main window...")
             
             # Close loading overlay
             self.loading.close()
+            
+            # Clean up temp window
+            if hasattr(self, 'temp_window'):
+                try:
+                    self.temp_window.destroy()
+                except:
+                    pass
+            
+            # NOW show the main window
+            self.deiconify()
             
             # Mark initialization complete
             self._initializing = False
@@ -371,26 +497,22 @@ class BensonApp(tk.Tk):
             self.lift()
             self.focus_force()
             
-            # Final message
-            self.add_console_message(f"✅ BENSON v2.0 ready with {instances_count} instances")
-            
-            print("[BensonApp] Initialization complete")
+            print("[BensonApp] ✅ Main window is now visible and ready!")
             
         except Exception as e:
-            print(f"[Finalize] Error: {e}")
+            print(f"[CloseLoading] Error: {e}")
+            # Fallback - show window anyway
+            self.deiconify()
 
-    def center_window(self):
-        """Center window on screen"""
+    def force_refresh_instances(self):
+        """Force refresh instances - called by instance manager (DISABLED)"""
         try:
-            self.update_idletasks()
-            width = 1200
-            height = 800
-            x = (self.winfo_screenwidth() // 2) - (width // 2)
-            y = (self.winfo_screenheight() // 2) - (height // 2)
-            self.geometry(f"{width}x{height}+{x}+{y}")
-            print(f"[BensonApp] Centered window at {x},{y}")
+            print("[BensonApp] Force refresh disabled - using simple card addition instead")
+            # Don't do full refresh anymore - instance operations handle it
+            pass
+            
         except Exception as e:
-            print(f"[Center] Error: {e}")
+            print(f"[ForceRefresh] Error: {e}")
 
     def load_instance_cards_simple(self):
         """Load instance cards without freezing"""
@@ -413,9 +535,13 @@ class BensonApp(tk.Tk):
                             sticky="e" if col == 0 else "w", 
                             in_=self.instances_container)
                     
-                    # Update UI every few cards
-                    if i % 3 == 2:
+                    # Force immediate update for visibility
+                    card.update_idletasks()
+                    
+                    # Update UI every few cards with more aggressive updates
+                    if i % 2 == 1:  # Update more frequently
                         self.update_idletasks()
+                        self.update()
                     
                     print(f"[BensonApp] Created card {i + 1}/{len(instances)}: {name}")
             
@@ -423,6 +549,11 @@ class BensonApp(tk.Tk):
             if hasattr(self, 'instances_container') and self.instance_cards:
                 self.instances_container.grid_columnconfigure(0, weight=1, minsize=580)
                 self.instances_container.grid_columnconfigure(1, weight=1, minsize=580)
+            
+            # Force final updates
+            if hasattr(self, 'instances_container'):
+                self.instances_container.update_idletasks()
+                self.instances_container.update()
             
             # Update scroll region
             if hasattr(self.ui_manager, 'update_scroll_region'):
@@ -432,13 +563,14 @@ class BensonApp(tk.Tk):
             if hasattr(self, 'instances_header'):
                 self.instances_header.configure(text=f"Instances ({len(self.instance_cards)})")
             
+            # Final UI update to ensure everything is visible
+            self.update_idletasks()
+            self.update()
+            
             print(f"[BensonApp] Completed card creation: {len(self.instance_cards)} cards")
             
         except Exception as e:
             print(f"[LoadCards] Error: {e}")
-
-    # Removed the problematic load_instances_after_create method that was causing duplicates
-    # Now instance operations handle their own card creation
 
     def reposition_all_cards(self):
         """Reposition all instance cards in grid"""
@@ -519,9 +651,12 @@ class BensonApp(tk.Tk):
 
     # Console operations
     def add_console_message(self, message):
-        """Add message to console"""
+        """Add message to console with better error handling"""
+        # Always print to console for debugging
+        print(f"[Console] {message}")
+        
         if not hasattr(self, 'console_text'):
-            print(f"[Console] {message}")
+            print(f"[Console] Console widget not available yet: {message}")
             return
 
         try:
@@ -532,8 +667,13 @@ class BensonApp(tk.Tk):
             self.console_text.insert("end", full_message)
             self.console_text.configure(state="disabled")
             self.console_text.see("end")
+            
+            # Force immediate update
+            self.console_text.update_idletasks()
+            
+            print(f"[Console] Successfully added message: {message}")
         except Exception as e:
-            print(f"[Console] Error: {e}")
+            print(f"[Console] Error adding message: {e} - Message was: {message}")
 
     def clear_console(self):
         """Clear console"""

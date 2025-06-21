@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - SMOOTH Instance Operations
-Fixed to prevent duplicate cards and enable smooth fade-in animations
+BENSON v2.0 - FIXED Instance Operations
+Fixed creation completion handling - simple card addition only
 """
 
 import tkinter as tk
@@ -10,13 +10,13 @@ import time
 
 
 class InstanceOperations:
-    """Smooth instance operations with proper card management"""
+    """Fixed instance operations with simple card addition"""
 
     def __init__(self, app_ref):
         self.app = app_ref
 
     def create_instance_with_name(self, name):
-        """Create instance with smooth animation and no duplicates"""
+        """Create instance with simple card addition"""
         if not name or not name.strip():
             self.app.add_console_message("✗ Invalid instance name")
             return
@@ -89,7 +89,7 @@ class InstanceOperations:
         print(f"[InstanceOps] 🚀 Creation thread started for {name}")
 
     def _handle_creation_completion(self, name, loading_card, success, error_msg):
-        """Handle completion with smooth animation"""
+        """Handle completion with simple card addition - NO REFRESH"""
         try:
             print(f"[InstanceOps] 🎯 Handling completion for {name}, success: {success}")
             
@@ -97,9 +97,10 @@ class InstanceOperations:
                 # Show success on loading card
                 if loading_card:
                     loading_card.show_success()
+                    print(f"[InstanceOps] ✅ Showing success for {name}")
                 
-                # Wait for success animation, then do SMOOTH replacement
-                self.app.after(1200, lambda: self._smooth_replace_with_real_card(name, loading_card))
+                # Wait for success animation, then add new card
+                self.app.after(1200, lambda: self._add_new_instance_card_simple(name, loading_card))
                 
             else:
                 # Show error
@@ -116,57 +117,42 @@ class InstanceOperations:
         except Exception as e:
             print(f"[InstanceOps] ❌ Error handling completion: {e}")
 
-    def _smooth_replace_with_real_card(self, name, loading_card):
-        """SMOOTH: Replace loading card with real card without full refresh"""
+    def _add_new_instance_card_simple(self, name, loading_card):
+        """Simply add the new instance card - SIMPLE VERSION"""
         try:
-            print(f"[InstanceOps] 🎨 Smooth replacement for {name}")
+            print(f"[InstanceOps] 🆕 Adding new card for {name} - SIMPLE METHOD")
             
-            # Get loading card position
-            loading_position = None
-            if loading_card in self.app.instance_cards:
-                loading_position = self.app.instance_cards.index(loading_card)
+            # Get fresh instance data (minimal refresh)
+            print(f"[InstanceOps] 📊 Getting fresh data for {name}")
+            self.app.instance_manager.load_real_instances()
+            instances = self.app.instance_manager.get_instances()
             
-            # Get fresh instance data (just this instance)
-            def get_new_instance_data():
-                """Background data fetch"""
-                try:
-                    self.app.instance_manager.load_real_instances()
-                    instances = self.app.instance_manager.get_instances()
-                    
-                    # Find our new instance
-                    new_instance = None
-                    for instance in instances:
-                        if instance["name"] == name or name in instance["name"] or instance["name"] in name:
-                            new_instance = instance
-                            break
-                    
-                    # Schedule smooth card creation on main thread
-                    self.app.after(0, lambda: self._create_smooth_replacement_card(
-                        new_instance, loading_card, loading_position
-                    ))
-                    
-                except Exception as e:
-                    print(f"[InstanceOps] ❌ Error getting instance data: {e}")
-                    # Fallback: remove loading card
-                    self.app.after(0, lambda: self._remove_loading_card(loading_card))
+            # Find our new instance
+            new_instance = None
+            for instance in instances:
+                instance_name = instance["name"]
+                # Check for exact match or partial match (since MEmu renames)
+                if (instance_name == name or 
+                    name in instance_name or 
+                    instance_name in name or
+                    instance_name.lower() == name.lower()):
+                    new_instance = instance
+                    print(f"[InstanceOps] 🎯 Found new instance: {instance_name}")
+                    break
             
-            # Get data in background
-            threading.Thread(target=get_new_instance_data, daemon=True).start()
-            
-        except Exception as e:
-            print(f"[InstanceOps] ❌ Error in smooth replacement: {e}")
-
-    def _create_smooth_replacement_card(self, new_instance, loading_card, loading_position):
-        """Create the replacement card with smooth animation"""
-        try:
             if not new_instance:
-                print("[InstanceOps] ❌ No new instance found, removing loading card")
+                print(f"[InstanceOps] ❌ Could not find new instance {name}")
                 self._remove_loading_card(loading_card)
                 return
             
-            print(f"[InstanceOps] 🆕 Creating real card for {new_instance['name']}")
+            # Remove loading card first
+            if loading_card and loading_card in self.app.instance_cards:
+                print(f"[InstanceOps] 🗑️ Removing loading card for {name}")
+                self.app.instance_cards.remove(loading_card)
+                loading_card.destroy()
             
             # Create the real card
+            print(f"[InstanceOps] 🏗️ Creating real card for {new_instance['name']}")
             real_card = self.app.ui_manager.create_instance_card(
                 new_instance["name"], 
                 new_instance["status"]
@@ -174,48 +160,43 @@ class InstanceOperations:
             
             if not real_card:
                 print("[InstanceOps] ❌ Failed to create real card")
-                self._remove_loading_card(loading_card)
                 return
             
-            # Replace loading card with real card
-            if loading_position is not None and loading_position < len(self.app.instance_cards):
-                # Replace at same position
-                self.app.instance_cards[loading_position] = real_card
-                
-                # Position the real card
-                row = loading_position // 2
-                col = loading_position % 2
-                real_card.grid(row=row, column=col, padx=4, pady=2, 
-                             sticky="e" if col == 0 else "w", 
-                             in_=self.app.instances_container)
-                
-                # Destroy loading card
-                loading_card.destroy()
-                
-                # SMOOTH: Add highlight animation to new card
-                self._add_smooth_highlight_animation(real_card, new_instance["name"])
-                
-            else:
-                # Fallback: append to end
-                self.app.instance_cards.append(real_card)
-                self._reposition_all_cards()
-                loading_card.destroy()
+            # Add to the end of the list
+            self.app.instance_cards.append(real_card)
+            
+            # Position the card at the end
+            card_index = len(self.app.instance_cards) - 1
+            row = card_index // 2
+            col = card_index % 2
+            
+            print(f"[InstanceOps] 📍 Positioning card at row {row}, col {col}")
+            real_card.grid(row=row, column=col, padx=4, pady=2, 
+                         sticky="e" if col == 0 else "w", 
+                         in_=self.app.instances_container)
+            
+            # Add highlight animation
+            self._add_highlight_animation(real_card, new_instance["name"])
             
             # Update UI
-            self._update_ui_after_creation(new_instance["name"])
+            self._update_ui_after_simple_add(new_instance["name"])
             
-            print(f"[InstanceOps] ✅ Smooth replacement complete for {new_instance['name']}")
+            print(f"[InstanceOps] ✅ Successfully added new card for {new_instance['name']}")
             
         except Exception as e:
-            print(f"[InstanceOps] ❌ Error creating replacement card: {e}")
-            self._remove_loading_card(loading_card)
+            print(f"[InstanceOps] ❌ Error adding new card: {e}")
+            import traceback
+            traceback.print_exc()
+            if loading_card:
+                self._remove_loading_card(loading_card)
 
-    def _add_smooth_highlight_animation(self, card, name):
-        """Add smooth highlight animation to new card"""
+    def _add_highlight_animation(self, card, name):
+        """Add highlight animation to new card"""
         try:
             print(f"[InstanceOps] ✨ Adding highlight animation for {name}")
             
             if not hasattr(card, 'main_container'):
+                print(f"[InstanceOps] ⚠️ Card has no main_container for {name}")
                 return
             
             # Start with normal color
@@ -249,20 +230,34 @@ class InstanceOperations:
         except Exception as e:
             print(f"[InstanceOps] ❌ Error adding animation: {e}")
 
-    def _update_ui_after_creation(self, name):
-        """Update UI after successful creation"""
+    def _update_ui_after_simple_add(self, name):
+        """Update UI after simple card addition"""
         try:
-            # Update counter
-            if hasattr(self.app, 'instances_header'):
-                count = len([c for c in self.app.instance_cards if hasattr(c, 'name')])
-                self.app.instances_header.configure(text=f"Instances ({count})")
+            print(f"[InstanceOps] 🔄 Updating UI after adding {name}")
+            
+            # Configure grid
+            if hasattr(self.app, 'instances_container') and self.app.instance_cards:
+                self.app.instances_container.grid_columnconfigure(0, weight=1, minsize=580)
+                self.app.instances_container.grid_columnconfigure(1, weight=1, minsize=580)
             
             # Update scroll region
             if hasattr(self.app.ui_manager, 'update_scroll_region'):
                 self.app.ui_manager.update_scroll_region()
+                # Scroll to show new card
+                self.app.after(100, self.app.ui_manager.scroll_to_bottom)
+            
+            # Update counter
+            if hasattr(self.app, 'instances_header'):
+                count = len(self.app.instance_cards)
+                self.app.instances_header.configure(text=f"Instances ({count})")
             
             # Success message
             self.app.add_console_message(f"✅ Successfully created MEmu instance: {name}")
+            
+            # Force UI update
+            self.app.update_idletasks()
+            
+            print(f"[InstanceOps] ✅ UI update complete for {name}")
             
         except Exception as e:
             print(f"[InstanceOps] ❌ Error updating UI: {e}")
@@ -299,7 +294,7 @@ class InstanceOperations:
         except Exception as e:
             print(f"[InstanceOps] ❌ Error repositioning cards: {e}")
 
-    # Delete operations remain the same
+    # Delete operations
     def delete_instance_card_with_animation(self, card):
         """Delete instance with animation"""
         result = messagebox.askyesno("Confirm Delete", 
@@ -374,6 +369,7 @@ class InstanceOperations:
         try:
             if deleting_card in self.app.instance_cards:
                 self.app.instance_cards.remove(deleting_card)
+                deleting_card.destroy()
             
             self._reposition_all_cards()
             self._update_counter()

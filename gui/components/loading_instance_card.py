@@ -102,17 +102,6 @@ class LoadingInstanceCard(tk.Frame):
         progress_frame = tk.Frame(self.content_frame, bg="#1e2329")
         progress_frame.pack(side="right", padx=12, pady=10)
         
-        # FIXED: Simpler progress dots
-        self.progress_label = tk.Label(
-            progress_frame,
-            text="●○○○○",
-            bg="#1e2329",
-            fg="#ffd93d",
-            font=("Segoe UI", 12),
-            width=8
-        )
-        self.progress_label.pack(pady=(5, 0))
-        
         # Simple status detail
         self.detail_label = tk.Label(
             progress_frame,
@@ -146,11 +135,6 @@ class LoadingInstanceCard(tk.Frame):
         try:
             if self._destroyed or not self.animation_running:
                 return
-            
-            # FIXED: Simple progress animation
-            patterns = ["●○○○○", "○●○○○", "○○●○○", "○○○●○", "○○○○●"]
-            pattern = patterns[self.animation_step % len(patterns)]
-            self.progress_label.configure(text=pattern)
             
             # FIXED: Simple icon rotation (less icons, slower change)
             icons = ["⚡", "⚙"]
@@ -192,7 +176,6 @@ class LoadingInstanceCard(tk.Frame):
             self.loading_icon.configure(text="✓", fg="#00ff88")
             self.status_icon.configure(text="✓", fg="#00ff88")
             self.status_text.configure(text="Created successfully!", fg="#00ff88")
-            self.progress_label.configure(text="●●●●●", fg="#00ff88")
             self.detail_label.configure(text="Instance ready!")
             
             print(f"[LoadingCard] {self.instance_name} - Success state shown")
@@ -216,7 +199,6 @@ class LoadingInstanceCard(tk.Frame):
             self.loading_icon.configure(text="✗", fg="#ff6b6b")
             self.status_icon.configure(text="✗", fg="#ff6b6b")
             self.status_text.configure(text="Creation failed", fg="#ff6b6b")
-            self.progress_label.configure(text="✗✗✗✗✗", fg="#ff6b6b")
             
             # Truncate long error messages
             display_message = error_message[:25] + "..." if len(error_message) > 25 else error_message
