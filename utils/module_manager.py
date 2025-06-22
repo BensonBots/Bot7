@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - Fixed Module Manager for Concurrent Multi-Module System
-Manages multiple modules running simultaneously with proper coordination
+BENSON v2.0 - Fixed Module Manager 
+Fixed AutoStart detection with proper timing and status checking
 """
 
 import os
@@ -11,7 +11,7 @@ from typing import Dict, List
 
 
 class ModuleManager:
-    """Fixed module manager for concurrent multi-module execution"""
+    """Fixed module manager with improved AutoStart detection"""
     
     def __init__(self, app_ref):
         self.app = app_ref
@@ -33,23 +33,11 @@ class ModuleManager:
             
             # Try to import optional modules
             AutoGatherModule = None
-            AutoTrainModule = None
-            AutoMailModule = None
             
             try:
                 from modules.auto_gather import AutoGatherModule
             except ImportError:
                 self.app.add_console_message("⚠️ AutoGather module not available")
-            
-            try:
-                from modules.auto_train import AutoTrainModule
-            except ImportError:
-                self.app.add_console_message("⚠️ AutoTrain module not available")
-            
-            try:
-                from modules.auto_mail import AutoMailModule
-            except ImportError:
-                self.app.add_console_message("⚠️ AutoMail module not available")
             
             instances = self.app.instance_manager.get_instances()
             
@@ -77,18 +65,6 @@ class ModuleManager:
                     gather_config = settings.get("auto_gather", {})
                     if gather_config.get("enabled", True):
                         manager.register_module(AutoGatherModule, **gather_config)
-                
-                # Register AutoTrain if available and enabled
-                if AutoTrainModule:
-                    train_config = settings.get("auto_train", {})
-                    if train_config.get("enabled", True):
-                        manager.register_module(AutoTrainModule, **train_config)
-                
-                # Register AutoMail if available and enabled
-                if AutoMailModule:
-                    mail_config = settings.get("auto_mail", {})
-                    if mail_config.get("enabled", True):
-                        manager.register_module(AutoMailModule, **mail_config)
                 
                 self.instance_managers[instance_name] = manager
                 
@@ -145,11 +121,58 @@ class ModuleManager:
             self.app.add_console_message(f"❌ Initial module auto-startup error: {e}")
     
     def trigger_auto_startup_for_instance(self, instance_name: str):
-        """Trigger auto-startup for specific instance (called when instance starts)"""
+        """FIXED: Trigger auto-startup with better timing and detection"""
         self.app.add_console_message(f"🎯 Module auto-startup triggered for {instance_name}")
         
-        # Delay to ensure instance is fully started
-        self.app.after(5000, lambda: self._start_all_modules_for_instance(instance_name))
+        # FIXED: Add longer delay and multiple checks to ensure instance is fully started
+        self.app.after(8000, lambda: self._check_and_start_modules(instance_name))
+    
+    def _check_and_start_modules(self, instance_name: str):
+        """FIXED: Check instance status multiple times before starting modules"""
+        def check_worker():
+            try:
+                max_attempts = 5
+                check_delay = 2  # seconds between checks
+                
+                for attempt in range(max_attempts):
+                    self.app.add_console_message(f"🔍 Checking {instance_name} status (attempt {attempt + 1}/{max_attempts})...")
+                    
+                    # Force refresh instance status
+                    self.app.instance_manager.update_instance_statuses()
+                    time.sleep(1)  # Wait for status update
+                    
+                    # Check current status
+                    instance = self.app.instance_manager.get_instance(instance_name)
+                    
+                    if instance:
+                        current_status = instance["status"]
+                        self.app.add_console_message(f"📊 {instance_name} current status: {current_status}")
+                        
+                        if current_status == "Running":
+                            # Instance is running, proceed with module startup
+                            self.app.add_console_message(f"✅ {instance_name} confirmed running, starting modules...")
+                            self.app.after(0, lambda: self._start_all_modules_for_instance(instance_name))
+                            return
+                        elif current_status in ["Starting", "Stopping"]:
+                            # Instance is transitioning, wait longer
+                            self.app.add_console_message(f"⏳ {instance_name} is {current_status.lower()}, waiting...")
+                            time.sleep(check_delay * 2)  # Wait longer for transitioning states
+                        else:
+                            # Instance stopped or error
+                            self.app.add_console_message(f"❌ {instance_name} status is {current_status}, waiting...")
+                            time.sleep(check_delay)
+                    else:
+                        self.app.add_console_message(f"❌ Could not find instance {instance_name}")
+                        time.sleep(check_delay)
+                
+                # All attempts failed
+                self.app.add_console_message(f"⏸ {instance_name} did not reach running state after {max_attempts} attempts")
+                
+            except Exception as e:
+                self.app.add_console_message(f"❌ Error checking {instance_name} status: {e}")
+        
+        # Run in background thread
+        threading.Thread(target=check_worker, daemon=True, name=f"StatusCheck-{instance_name}").start()
     
     def _start_all_modules_for_instance(self, instance_name: str):
         """Start all enabled modules for an instance"""
@@ -158,10 +181,10 @@ class ModuleManager:
                 self.app.add_console_message(f"❌ No module manager for {instance_name}")
                 return
             
-            # Final verification that instance is still running
+            # FINAL verification that instance is still running
             instance = self.app.instance_manager.get_instance(instance_name)
             if not instance or instance["status"] != "Running":
-                self.app.add_console_message(f"⏸ {instance_name} not running, aborting module startup")
+                self.app.add_console_message(f"⏸ {instance_name} not running during final check, aborting module startup")
                 return
             
             manager = self.instance_managers[instance_name]
@@ -179,11 +202,62 @@ class ModuleManager:
             
             if success:
                 self.app.add_console_message(f"✅ Module system started for {instance_name}")
+                
+                # Give the AutoStart module a moment to initialize, then trigger it
+                self.app.after(2000, lambda: self._trigger_autostart_module(instance_name))
             else:
                 self.app.add_console_message(f"❌ Failed to start module system for {instance_name}")
                 
         except Exception as e:
             self.app.add_console_message(f"❌ Error starting modules for {instance_name}: {e}")
+    
+    def _trigger_autostart_module(self, instance_name: str):
+        """FIXED: Manually trigger the AutoStart module"""
+        try:
+            if instance_name not in self.instance_managers:
+                return
+            
+            manager = self.instance_managers[instance_name]
+            
+            # Get the AutoStartGame module
+            status_report = manager.get_status_report()
+            
+            if "AutoStartGameModule" in status_report.get("module_statuses", {}):
+                module_status = status_report["module_statuses"]["AutoStartGameModule"]
+                
+                if module_status.get("status") == "running":
+                    self.app.add_console_message(f"🚀 Triggering AutoStart for {instance_name}...")
+                    
+                    # Try to get the actual module instance and start it
+                    autostart_module = manager.modules.get("AutoStartGameModule")
+                    if autostart_module and hasattr(autostart_module, 'start_auto_game'):
+                        # Start the auto game process
+                        success = autostart_module.start_auto_game(
+                            instance_name=instance_name,
+                            max_retries=3,
+                            on_complete=lambda success: self._on_autostart_complete(instance_name, success)
+                        )
+                        
+                        if success:
+                            self.app.add_console_message(f"✅ AutoStart initiated for {instance_name}")
+                        else:
+                            self.app.add_console_message(f"❌ Failed to initiate AutoStart for {instance_name}")
+                    else:
+                        self.app.add_console_message(f"❌ AutoStart module not available for {instance_name}")
+                else:
+                    self.app.add_console_message(f"❌ AutoStart module not running for {instance_name}")
+            else:
+                self.app.add_console_message(f"❌ AutoStart module not found for {instance_name}")
+                
+        except Exception as e:
+            self.app.add_console_message(f"❌ Error triggering AutoStart for {instance_name}: {e}")
+    
+    def _on_autostart_complete(self, instance_name: str, success: bool):
+        """Handle AutoStart completion"""
+        if success:
+            self.app.add_console_message(f"🎉 AutoStart completed successfully for {instance_name}")
+        else:
+            self.app.add_console_message(f"❌ AutoStart failed for {instance_name}")
     
     def _start_status_monitoring(self):
         """Start background status monitoring"""
@@ -195,7 +269,7 @@ class ModuleManager:
         def monitor_loop():
             while self.status_monitor_running:
                 try:
-                    time.sleep(10)  # Check every 10 seconds
+                    time.sleep(15)  # Check every 15 seconds
                     
                     if not self.initialization_complete:
                         continue
@@ -253,22 +327,10 @@ class ModuleManager:
                 "min_march_capacity": 100000,
                 "max_concurrent_gathers": 5
             },
-            "auto_train": {
+            "march_assignment": {
                 "enabled": True,
-                "check_interval": 60,
-                "troop_types": ["infantry", "ranged", "cavalry", "siege"],
-                "training_priority": ["infantry", "ranged", "cavalry"],
-                "max_training_queues": 4,
-                "min_resource_threshold": 50000
-            },
-            "auto_mail": {
-                "enabled": True,
-                "check_interval": 120,
-                "claim_resources": True,
-                "claim_items": True,
-                "claim_speedups": True,
-                "claim_gems": True,
-                "delete_read_mail": False
+                "unlocked_queues": 2,
+                "queue_assignments": {"1": "AutoGather", "2": "AutoGather"}
             }
         }
         

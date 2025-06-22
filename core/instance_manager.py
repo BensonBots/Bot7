@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - Instance Manager
-FINAL VERSION - Fast creation without hanging rename
+BENSON v2.0 - FIXED Instance Manager
+Fixed MEmu status detection to properly handle all status codes
 """
 
 import subprocess
@@ -63,10 +63,10 @@ class InstanceManager:
                         if len(parts) >= 3:
                             index = int(parts[0])
                             name = parts[1]
-                            status_code = int(parts[2])
+                            status_info = parts[2] if len(parts) > 2 else "0"
                             
-                            # Convert status code to readable status
-                            status = self._get_status_from_code(status_code)
+                            # FIXED: Better status detection based on MEmu output format
+                            status = self._parse_memu_status(parts)
                             
                             instance = {
                                 "index": index,
@@ -75,7 +75,7 @@ class InstanceManager:
                             }
                             self.instances.append(instance)
                             
-                            print(f"[InstanceManager] Checking {name} (index {index}) - MEmu says: {status_code}")
+                            print(f"[InstanceManager] Parsed {name} (index {index}) - Status: {status}")
                     except (ValueError, IndexError) as e:
                         print(f"[InstanceManager] Error parsing line '{line}': {e}")
             
@@ -86,8 +86,64 @@ class InstanceManager:
         except Exception as e:
             print(f"[InstanceManager] Error loading instances: {e}")
 
+    def _parse_memu_status(self, parts):
+        """FIXED: Parse MEmu status from listvms output with better detection"""
+        try:
+            # MEmu listvms format: index,name,memory,status,cpu
+            # Where memory > 0 usually indicates running instance
+            
+            if len(parts) >= 5:
+                # New format: index,name,memory,status,cpu
+                memory = int(parts[2]) if parts[2].isdigit() else 0
+                status_code = int(parts[3]) if parts[3].isdigit() else 0
+                cpu = int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else 0
+                
+                # FIXED: If instance has memory allocated, it's likely running
+                if memory > 0 and status_code == 1:
+                    return "Running"
+                elif memory > 0 and status_code == 0:
+                    return "Starting"  # Has memory but not fully running yet
+                elif status_code == 1:
+                    return "Running"
+                elif status_code == 2:
+                    return "Starting"
+                elif status_code == 3:
+                    return "Stopping"
+                else:
+                    return "Stopped"
+                    
+            elif len(parts) >= 3:
+                # Old format: index,name,status
+                status_code_or_memory = parts[2]
+                
+                if status_code_or_memory.isdigit():
+                    value = int(status_code_or_memory)
+                    
+                    # FIXED: If it's a large number, it's probably memory (running)
+                    if value > 1000000:  # Large number = memory allocation = running
+                        return "Running"
+                    elif value == 0:
+                        return "Stopped"
+                    elif value == 1:
+                        return "Running"
+                    elif value == 2:
+                        return "Starting"
+                    elif value == 3:
+                        return "Stopping"
+                    else:
+                        # Unknown status code but instance might be running
+                        return "Running" if value > 0 else "Stopped"
+                else:
+                    return "Stopped"
+                    
+        except (ValueError, IndexError) as e:
+            print(f"[InstanceManager] Error parsing status: {e}")
+            return "Unknown"
+        
+        return "Stopped"
+
     def _get_status_from_code(self, code):
-        """Convert MEmu status code to readable status"""
+        """LEGACY: Convert MEmu status code to readable status"""
         status_map = {
             0: "Stopped",
             1: "Running", 
@@ -440,10 +496,9 @@ class InstanceManager:
                         if len(parts) >= 3:
                             line_index = int(parts[0])
                             line_name = parts[1]
-                            status_code = int(parts[2])
                             
                             if line_index == index or line_name == name:
-                                return self._get_status_from_code(status_code)
+                                return self._parse_memu_status(parts)
             
             return "Unknown"
             

@@ -1,580 +1,299 @@
 """
-BENSON v2.0 - Corrected March Queue Management System
-March queues are for gathering and rallies only, not training
-Training happens at buildings and doesn't use march slots
+BENSON v2.0 - Updated March Assignment System
+Simplified march queue management with individual queue configuration
 """
 
 import json
-import threading
-import time
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timedelta
-from enum import Enum
+import os
+from typing import Dict, List, Optional
+from datetime import datetime
 
 
-class MarchAssignment(Enum):
-    """March queue assignment types"""
-    AUTO_GATHER = "auto_gather"      # Used by AutoGather module
-    RALLY_RESERVED = "rally_reserved"  # Reserved for rally participation
-    MANUAL_ONLY = "manual_only"      # Completely manual control
-    LOCKED = "locked"                # Queue not unlocked yet
-
-
-class MarchStatus(Enum):
-    """March queue status"""
-    IDLE = "idle"                    # Available for new tasks
-    GATHERING = "gathering"          # Currently gathering resources
-    RALLY = "rally"                  # Participating in rally
-    MANUAL_USE = "manual_use"        # Being used manually
-    LOCKED = "locked"                # Queue not unlocked
-    UNKNOWN = "unknown"              # Status unclear
-
-
-class MarchQueue:
-    """Represents a single march queue"""
+class SimplifiedMarchManager:
+    """Simplified march queue manager for individual queue configuration"""
     
-    def __init__(self, queue_number: int, is_unlocked: bool = True, 
-                 assignment: MarchAssignment = MarchAssignment.AUTO_GATHER):
-        self.queue_number = queue_number
-        self.is_unlocked = is_unlocked
-        self.assignment = assignment if is_unlocked else MarchAssignment.LOCKED
-        self.status = MarchStatus.IDLE if is_unlocked else MarchStatus.LOCKED
-        
-        # Current operation tracking
-        self.current_task = None
-        self.resource_type = None
-        self.target_location = None
-        self.estimated_return = None
-        self.march_capacity = 0
-        self.last_updated = datetime.now()
-        
-        # Statistics
-        self.usage_count = 0
-        self.total_duration = timedelta()
-        self.resources_gathered = {"food": 0, "wood": 0, "iron": 0, "stone": 0}
-    
-    def start_gathering(self, resource_type: str, estimated_duration: timedelta, 
-                       capacity: int = 0, location: str = None):
-        """Start a gathering operation on this queue"""
-        if not self.is_available_for_gathering():
-            return False
-        
-        self.current_task = f"gather_{resource_type}"
-        self.resource_type = resource_type
-        self.target_location = location
-        self.march_capacity = capacity
-        self.status = MarchStatus.GATHERING
-        self.estimated_return = datetime.now() + estimated_duration
-        self.last_updated = datetime.now()
-        self.usage_count += 1
-        
-        return True
-    
-    def start_rally(self, rally_target: str, estimated_duration: timedelta):
-        """Start rally participation on this queue"""
-        if not self.is_available_for_rally():
-            return False
-        
-        self.current_task = f"rally_{rally_target}"
-        self.target_location = rally_target
-        self.status = MarchStatus.RALLY
-        self.estimated_return = datetime.now() + estimated_duration
-        self.last_updated = datetime.now()
-        self.usage_count += 1
-        
-        return True
-    
-    def complete_operation(self, resources_gained: Dict[str, int] = None):
-        """Complete current operation and return to idle"""
-        if self.current_task and self.estimated_return:
-            # Calculate actual duration
-            start_time = self.estimated_return - (self.estimated_return - self.last_updated)
-            actual_duration = datetime.now() - start_time
-            self.total_duration += actual_duration
-        
-        # Record resources if gathering
-        if resources_gained and self.status == MarchStatus.GATHERING:
-            for resource, amount in resources_gained.items():
-                if resource in self.resources_gathered:
-                    self.resources_gathered[resource] += amount
-        
-        # Reset to idle
-        self.current_task = None
-        self.resource_type = None
-        self.target_location = None
-        self.estimated_return = None
-        self.march_capacity = 0
-        self.status = MarchStatus.IDLE if self.is_unlocked else MarchStatus.LOCKED
-        self.last_updated = datetime.now()
-    
-    def is_available_for_gathering(self) -> bool:
-        """Check if queue is available for gathering"""
-        if not self.is_unlocked or self.assignment == MarchAssignment.LOCKED:
-            return False
-        
-        if self.assignment == MarchAssignment.MANUAL_ONLY:
-            return False
-        
-        if self.status == MarchStatus.IDLE:
-            return True
-        
-        # Check if operation should be completed by now
-        if self.estimated_return and datetime.now() >= self.estimated_return:
-            self.complete_operation()
-            return True
-        
-        return False
-    
-    def is_available_for_rally(self) -> bool:
-        """Check if queue is available for rally participation"""
-        if not self.is_unlocked or self.assignment == MarchAssignment.LOCKED:
-            return False
-        
-        # Rally reserved and manual queues can be used for rallies
-        if self.assignment in [MarchAssignment.RALLY_RESERVED, MarchAssignment.MANUAL_ONLY]:
-            return self.status == MarchStatus.IDLE or (
-                self.estimated_return and datetime.now() >= self.estimated_return
-            )
-        
-        return False
-    
-    def unlock_queue(self):
-        """Unlock this march queue"""
-        if not self.is_unlocked:
-            self.is_unlocked = True
-            self.assignment = MarchAssignment.AUTO_GATHER  # Default assignment
-            self.status = MarchStatus.IDLE
-            return True
-        return False
-    
-    def lock_queue(self):
-        """Lock this march queue (if player loses VIP or downgrades)"""
-        if self.is_unlocked:
-            # Complete any current operation first
-            if self.status in [MarchStatus.GATHERING, MarchStatus.RALLY]:
-                self.complete_operation()
-            
-            self.is_unlocked = False
-            self.assignment = MarchAssignment.LOCKED
-            self.status = MarchStatus.LOCKED
-            return True
-        return False
-    
-    def get_info(self) -> Dict:
-        """Get comprehensive queue information"""
-        return {
-            "queue_number": self.queue_number,
-            "is_unlocked": self.is_unlocked,
-            "assignment": self.assignment.value,
-            "status": self.status.value,
-            "current_task": self.current_task,
-            "resource_type": self.resource_type,
-            "target_location": self.target_location,
-            "march_capacity": self.march_capacity,
-            "estimated_return": self.estimated_return.isoformat() if self.estimated_return else None,
-            "is_available_for_gathering": self.is_available_for_gathering(),
-            "is_available_for_rally": self.is_available_for_rally(),
-            "usage_count": self.usage_count,
-            "total_duration_hours": self.total_duration.total_seconds() / 3600,
-            "resources_gathered": self.resources_gathered.copy(),
-            "last_updated": self.last_updated.isoformat()
-        }
-
-
-class MarchQueueManager:
-    """Manages all march queues for an instance"""
-    
-    def __init__(self, instance_name: str, console_callback=None):
+    def __init__(self, instance_name: str):
         self.instance_name = instance_name
-        self.console_callback = console_callback or print
-        
-        # Initialize march queues (6 maximum)
-        self.march_queues = {}
-        self._initialize_queues()
-        
-        # Load configuration
         self.settings_file = f"march_config_{instance_name}.json"
-        self._load_march_configuration()
         
-        # Statistics
-        self.total_gathers_sent = 0
-        self.total_rallies_joined = 0
-        self.operation_history = []
-        
-        # Thread safety
-        self.lock = threading.Lock()
-    
-    def _initialize_queues(self):
-        """Initialize march queues with default unlock status"""
-        # Most players start with 2-3 queues unlocked
-        # Queue 1-2: Usually unlocked by default
-        # Queue 3-4: Unlocked through VIP or research
-        # Queue 5-6: Higher VIP levels or advanced research
-        
-        default_unlock_status = {
-            1: True,   # Always unlocked
-            2: True,   # Usually unlocked
-            3: False,  # VIP/Research required
-            4: False,  # Higher VIP/Research
-            5: False,  # High VIP
-            6: False   # Maximum VIP
+        # Default queue assignments
+        self.queue_assignments = {
+            1: "AutoGather",      # Queue 1: Usually for gathering
+            2: "AutoGather",      # Queue 2: Usually for gathering
+            3: "Rally/Manual",    # Queue 3: For rallies/manual (if unlocked)
+            4: "Rally/Manual",    # Queue 4: For rallies/manual (if unlocked)
+            5: "Manual Only",     # Queue 5: Manual only (if unlocked)
+            6: "Manual Only"      # Queue 6: Manual only (if unlocked)
         }
         
-        for queue_num in range(1, 7):
-            is_unlocked = default_unlock_status.get(queue_num, False)
-            self.march_queues[queue_num] = MarchQueue(queue_num, is_unlocked)
+        # Number of unlocked queues (default 2)
+        self.unlocked_queues = 2
+        
+        # Load existing configuration
+        self.load_configuration()
     
-    def _load_march_configuration(self):
+    def load_configuration(self):
         """Load march queue configuration from file"""
         try:
-            with open(self.settings_file, 'r') as f:
-                config = json.load(f)
-            
-            # Load unlock status
-            unlock_status = config.get("unlocked_queues", {})
-            for queue_num, is_unlocked in unlock_status.items():
-                queue_number = int(queue_num)
-                if queue_number in self.march_queues:
-                    if is_unlocked and not self.march_queues[queue_number].is_unlocked:
-                        self.march_queues[queue_number].unlock_queue()
-                    elif not is_unlocked and self.march_queues[queue_number].is_unlocked:
-                        self.march_queues[queue_number].lock_queue()
-            
-            # Load assignments
-            assignments = config.get("queue_assignments", {})
-            assignment_mapping = {
-                "AutoGather": MarchAssignment.AUTO_GATHER,
-                "Rally/Manual": MarchAssignment.RALLY_RESERVED,
-                "Manual Only": MarchAssignment.MANUAL_ONLY
-            }
-            
-            for queue_num, assignment_name in assignments.items():
-                queue_number = int(queue_num)
-                if queue_number in self.march_queues and self.march_queues[queue_number].is_unlocked:
-                    assignment = assignment_mapping.get(assignment_name, MarchAssignment.AUTO_GATHER)
-                    self.march_queues[queue_number].assignment = assignment
-            
-            self.log_message(f"📋 Loaded march queue configuration")
-            self._log_queue_summary()
-            
-        except FileNotFoundError:
-            self.log_message(f"📋 No march configuration found, using defaults")
-            self._apply_default_configuration()
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r') as f:
+                    config = json.load(f)
+                
+                # Load unlocked queue count
+                self.unlocked_queues = config.get("unlocked_queues", 2)
+                
+                # Load individual queue assignments
+                saved_assignments = config.get("queue_assignments", {})
+                for queue_str, assignment in saved_assignments.items():
+                    queue_num = int(queue_str)
+                    if 1 <= queue_num <= 6:
+                        self.queue_assignments[queue_num] = assignment
+                
+                print(f"[MarchManager] Loaded configuration for {self.instance_name}: {self.unlocked_queues} queues")
+                
         except Exception as e:
-            self.log_message(f"❌ Error loading march configuration: {e}")
-            self._apply_default_configuration()
+            print(f"[MarchManager] Error loading configuration: {e}")
+            # Use defaults
+            pass
     
-    def _apply_default_configuration(self):
-        """Apply default march queue configuration"""
-        # Default assignments for unlocked queues
-        for queue in self.march_queues.values():
-            if queue.is_unlocked:
-                if queue.queue_number <= 2:
-                    queue.assignment = MarchAssignment.AUTO_GATHER
-                elif queue.queue_number <= 4:
-                    queue.assignment = MarchAssignment.AUTO_GATHER  
-                else:
-                    queue.assignment = MarchAssignment.RALLY_RESERVED
-        
-        self._log_queue_summary()
-    
-    def _log_queue_summary(self):
-        """Log current march queue status"""
-        unlocked_count = len([q for q in self.march_queues.values() if q.is_unlocked])
-        assignment_summary = {}
-        
-        for queue in self.march_queues.values():
-            if queue.is_unlocked:
-                assignment = queue.assignment.value
-                assignment_summary[assignment] = assignment_summary.get(assignment, 0) + 1
-        
-        self.log_message(f"📊 March Queues: {unlocked_count}/6 unlocked")
-        if assignment_summary:
-            summary_text = ", ".join([f"{count} {assignment.replace('_', ' ')}" 
-                                    for assignment, count in assignment_summary.items()])
-            self.log_message(f"📊 Assignments: {summary_text}")
-    
-    def log_message(self, message: str):
-        """Log message with queue manager context"""
-        formatted_message = f"[MarchQueue-{self.instance_name}] {message}"
-        if self.console_callback:
-            self.console_callback(formatted_message)
-        print(formatted_message)
-    
-    def update_unlocked_queues(self, unlocked_queues: List[int]):
-        """Update which queues are unlocked"""
-        with self.lock:
-            changes_made = False
-            
-            for queue_num in range(1, 7):
-                should_be_unlocked = queue_num in unlocked_queues
-                queue = self.march_queues[queue_num]
-                
-                if should_be_unlocked and not queue.is_unlocked:
-                    queue.unlock_queue()
-                    self.log_message(f"🔓 Unlocked march queue #{queue_num}")
-                    changes_made = True
-                elif not should_be_unlocked and queue.is_unlocked:
-                    queue.lock_queue()
-                    self.log_message(f"🔒 Locked march queue #{queue_num}")
-                    changes_made = True
-            
-            if changes_made:
-                self._save_configuration()
-                self._log_queue_summary()
-            
-            return changes_made
-    
-    def request_queue_for_gathering(self, resource_type: str, 
-                                  estimated_duration: timedelta = None,
-                                  capacity: int = 0) -> Optional[int]:
-        """Request a march queue for resource gathering"""
-        with self.lock:
-            # Find available AUTO_GATHER queues
-            available_queues = [
-                queue for queue in self.march_queues.values()
-                if queue.assignment == MarchAssignment.AUTO_GATHER and queue.is_available_for_gathering()
-            ]
-            
-            if not available_queues:
-                self.log_message(f"❌ No available gathering queues for {resource_type}")
-                return None
-            
-            # Select the lowest numbered available queue
-            selected_queue = min(available_queues, key=lambda q: q.queue_number)
-            
-            # Start the gathering operation
-            duration = estimated_duration or timedelta(hours=2)  # Default 2 hours
-            location = f"{resource_type}_tile_{int(time.time())}"  # Placeholder location
-            
-            success = selected_queue.start_gathering(resource_type, duration, capacity, location)
-            
-            if success:
-                self.total_gathers_sent += 1
-                self.operation_history.append({
-                    "type": "gather",
-                    "queue": selected_queue.queue_number,
-                    "resource": resource_type,
-                    "timestamp": datetime.now().isoformat(),
-                    "estimated_duration": duration.total_seconds() / 3600,
-                    "capacity": capacity
-                })
-                
-                self.log_message(f"✅ Queue #{selected_queue.queue_number} gathering {resource_type}")
-                return selected_queue.queue_number
-            
-            return None
-    
-    def request_queue_for_rally(self, rally_target: str, 
-                              estimated_duration: timedelta = None) -> Optional[int]:
-        """Request a march queue for rally participation"""
-        with self.lock:
-            # Find available rally queues
-            available_queues = [
-                queue for queue in self.march_queues.values()
-                if queue.is_available_for_rally()
-            ]
-            
-            if not available_queues:
-                self.log_message(f"❌ No available rally queues for {rally_target}")
-                return None
-            
-            # Prefer rally-reserved queues, then manual queues
-            rally_reserved = [q for q in available_queues if q.assignment == MarchAssignment.RALLY_RESERVED]
-            selected_queue = (rally_reserved[0] if rally_reserved else available_queues[0])
-            
-            # Start the rally operation
-            duration = estimated_duration or timedelta(minutes=30)  # Default 30 minutes
-            
-            success = selected_queue.start_rally(rally_target, duration)
-            
-            if success:
-                self.total_rallies_joined += 1
-                self.operation_history.append({
-                    "type": "rally",
-                    "queue": selected_queue.queue_number,
-                    "target": rally_target,
-                    "timestamp": datetime.now().isoformat(),
-                    "estimated_duration": duration.total_seconds() / 3600
-                })
-                
-                self.log_message(f"⚔️ Queue #{selected_queue.queue_number} joining rally: {rally_target}")
-                return selected_queue.queue_number
-            
-            return None
-    
-    def complete_operation(self, queue_number: int, resources_gained: Dict[str, int] = None):
-        """Mark an operation as completed"""
-        with self.lock:
-            if queue_number not in self.march_queues:
-                return False
-            
-            queue = self.march_queues[queue_number]
-            operation_type = "rally" if queue.status == MarchStatus.RALLY else "gathering"
-            target = queue.target_location or queue.resource_type
-            
-            queue.complete_operation(resources_gained)
-            
-            if target:
-                self.log_message(f"✅ Queue #{queue_number} completed {operation_type}: {target}")
-                if resources_gained:
-                    resource_text = ", ".join([f"{amount:,} {res}" for res, amount in resources_gained.items() if amount > 0])
-                    if resource_text:
-                        self.log_message(f"📦 Gained: {resource_text}")
-            
-            return True
-    
-    def get_available_gathering_queues(self) -> int:
-        """Get number of available queues for gathering"""
-        with self.lock:
-            return len([
-                queue for queue in self.march_queues.values()
-                if queue.assignment == MarchAssignment.AUTO_GATHER and queue.is_available_for_gathering()
-            ])
-    
-    def get_available_rally_queues(self) -> int:
-        """Get number of available queues for rallies"""
-        with self.lock:
-            return len([
-                queue for queue in self.march_queues.values()
-                if queue.is_available_for_rally()
-            ])
-    
-    def get_gathering_capacity(self) -> int:
-        """Get total gathering capacity (assigned gathering queues)"""
-        return len([
-            queue for queue in self.march_queues.values()
-            if queue.assignment == MarchAssignment.AUTO_GATHER and queue.is_unlocked
-        ])
-    
-    def get_active_operations(self) -> Dict[str, List[Dict]]:
-        """Get information about active operations"""
-        active_gathers = []
-        active_rallies = []
-        
-        for queue in self.march_queues.values():
-            if queue.status == MarchStatus.GATHERING:
-                active_gathers.append({
-                    "queue_number": queue.queue_number,
-                    "resource_type": queue.resource_type,
-                    "capacity": queue.march_capacity,
-                    "location": queue.target_location,
-                    "estimated_return": queue.estimated_return.isoformat() if queue.estimated_return else None
-                })
-            elif queue.status == MarchStatus.RALLY:
-                active_rallies.append({
-                    "queue_number": queue.queue_number,
-                    "target": queue.target_location,
-                    "estimated_return": queue.estimated_return.isoformat() if queue.estimated_return else None
-                })
-        
-        return {
-            "gathers": active_gathers,
-            "rallies": active_rallies
-        }
-    
-    def get_comprehensive_status(self) -> Dict:
-        """Get comprehensive march queue manager status"""
-        with self.lock:
-            unlocked_queues = [q.queue_number for q in self.march_queues.values() if q.is_unlocked]
-            active_ops = self.get_active_operations()
-            
-            status = {
-                "instance_name": self.instance_name,
-                "total_queues": 6,
-                "unlocked_queues": len(unlocked_queues),
-                "unlocked_queue_numbers": unlocked_queues,
-                "available_gathering_queues": self.get_available_gathering_queues(),
-                "available_rally_queues": self.get_available_rally_queues(),
-                "gathering_capacity": self.get_gathering_capacity(),
-                "total_gathers_sent": self.total_gathers_sent,
-                "total_rallies_joined": self.total_rallies_joined,
-                "active_gathers": len(active_ops["gathers"]),
-                "active_rallies": len(active_ops["rallies"]),
-                "queues": {
-                    queue_num: queue.get_info() 
-                    for queue_num, queue in self.march_queues.items()
-                },
-                "active_operations": active_ops,
-                "recent_operations": self.operation_history[-10:]  # Last 10 operations
-            }
-            
-            return status
-    
-    def update_queue_assignments(self, new_assignments: Dict[int, str]):
-        """Update march queue assignments"""
-        with self.lock:
-            assignment_mapping = {
-                "AutoGather": MarchAssignment.AUTO_GATHER,
-                "Rally/Manual": MarchAssignment.RALLY_RESERVED,
-                "Manual Only": MarchAssignment.MANUAL_ONLY
-            }
-            
-            changes_made = False
-            
-            for queue_num, assignment_name in new_assignments.items():
-                if queue_num in self.march_queues and self.march_queues[queue_num].is_unlocked:
-                    new_assignment = assignment_mapping.get(assignment_name, MarchAssignment.AUTO_GATHER)
-                    old_assignment = self.march_queues[queue_num].assignment
-                    
-                    if old_assignment != new_assignment:
-                        # If queue is currently busy and being changed to manual, warn
-                        queue = self.march_queues[queue_num]
-                        if (not queue.is_available_for_gathering() and 
-                            new_assignment == MarchAssignment.MANUAL_ONLY):
-                            self.log_message(f"⚠️ Queue #{queue_num} changed to manual but currently busy")
-                        
-                        self.march_queues[queue_num].assignment = new_assignment
-                        changes_made = True
-                        self.log_message(f"🔄 Queue #{queue_num}: {old_assignment.value} → {new_assignment.value}")
-            
-            if changes_made:
-                self._save_configuration()
-                self._log_queue_summary()
-            
-            return changes_made
-    
-    def _save_configuration(self):
-        """Save current march configuration to file"""
+    def save_configuration(self):
+        """Save march queue configuration to file"""
         try:
             config = {
-                "unlocked_queues": {
-                    str(queue_num): queue.is_unlocked
-                    for queue_num, queue in self.march_queues.items()
+                "unlocked_queues": self.unlocked_queues,
+                "queue_assignments": {
+                    str(queue_num): assignment 
+                    for queue_num, assignment in self.queue_assignments.items()
+                    if queue_num <= self.unlocked_queues
                 },
-                "queue_assignments": {},
-                "last_updated": datetime.now().isoformat()
+                "last_updated": datetime.now().isoformat(),
+                "instance_name": self.instance_name
             }
-            
-            assignment_mapping = {
-                MarchAssignment.AUTO_GATHER: "AutoGather",
-                MarchAssignment.RALLY_RESERVED: "Rally/Manual",
-                MarchAssignment.MANUAL_ONLY: "Manual Only"
-            }
-            
-            for queue_num, queue in self.march_queues.items():
-                if queue.is_unlocked:
-                    config["queue_assignments"][str(queue_num)] = assignment_mapping[queue.assignment]
             
             with open(self.settings_file, 'w') as f:
                 json.dump(config, f, indent=2)
-            
-            self.log_message("💾 Saved march queue configuration")
+                
+            print(f"[MarchManager] Saved configuration for {self.instance_name}")
             
         except Exception as e:
-            self.log_message(f"❌ Error saving configuration: {e}")
+            print(f"[MarchManager] Error saving configuration: {e}")
     
-    def force_return_queue(self, queue_number: int, reason: str = "Manual override"):
-        """Force a march queue to return (emergency)"""
-        with self.lock:
-            if queue_number not in self.march_queues:
-                return False
+    def update_unlocked_queues(self, count: int):
+        """Update number of unlocked queues"""
+        if 1 <= count <= 6:
+            self.unlocked_queues = count
+            print(f"[MarchManager] Updated unlocked queues to {count}")
+            return True
+        return False
+    
+    def update_queue_assignment(self, queue_number: int, assignment: str):
+        """Update assignment for a specific queue"""
+        valid_assignments = ["AutoGather", "Rally/Manual", "Manual Only"]
+        
+        if 1 <= queue_number <= 6 and assignment in valid_assignments:
+            self.queue_assignments[queue_number] = assignment
+            print(f"[MarchManager] Updated queue {queue_number} to {assignment}")
+            return True
+        return False
+    
+    def get_queue_assignment(self, queue_number: int) -> str:
+        """Get assignment for a specific queue"""
+        if queue_number <= self.unlocked_queues:
+            return self.queue_assignments.get(queue_number, "AutoGather")
+        return "Locked"
+    
+    def get_available_gather_queues(self) -> List[int]:
+        """Get list of queues available for gathering"""
+        available = []
+        for queue_num in range(1, self.unlocked_queues + 1):
+            if self.queue_assignments.get(queue_num) == "AutoGather":
+                available.append(queue_num)
+        return available
+    
+    def get_available_rally_queues(self) -> List[int]:
+        """Get list of queues available for rallies"""
+        available = []
+        for queue_num in range(1, self.unlocked_queues + 1):
+            assignment = self.queue_assignments.get(queue_num)
+            if assignment in ["Rally/Manual", "Manual Only"]:
+                available.append(queue_num)
+        return available
+    
+    def get_manual_only_queues(self) -> List[int]:
+        """Get list of queues that are manual only"""
+        manual = []
+        for queue_num in range(1, self.unlocked_queues + 1):
+            if self.queue_assignments.get(queue_num) == "Manual Only":
+                manual.append(queue_num)
+        return manual
+    
+    def get_queue_summary(self) -> Dict:
+        """Get summary of queue configuration"""
+        summary = {
+            "instance_name": self.instance_name,
+            "total_queues": 6,
+            "unlocked_queues": self.unlocked_queues,
+            "queue_assignments": {},
+            "available_for_gather": len(self.get_available_gather_queues()),
+            "available_for_rally": len(self.get_available_rally_queues()),
+            "manual_only": len(self.get_manual_only_queues())
+        }
+        
+        # Add individual queue info
+        for queue_num in range(1, 7):
+            if queue_num <= self.unlocked_queues:
+                assignment = self.queue_assignments.get(queue_num, "AutoGather")
+                summary["queue_assignments"][f"queue_{queue_num}"] = {
+                    "assignment": assignment,
+                    "available": True
+                }
+            else:
+                summary["queue_assignments"][f"queue_{queue_num}"] = {
+                    "assignment": "Locked",
+                    "available": False
+                }
+        
+        return summary
+    
+    def reset_to_defaults(self):
+        """Reset queue configuration to defaults"""
+        self.unlocked_queues = 2
+        self.queue_assignments = {
+            1: "AutoGather",
+            2: "AutoGather", 
+            3: "Rally/Manual",
+            4: "Rally/Manual",
+            5: "Manual Only",
+            6: "Manual Only"
+        }
+        print(f"[MarchManager] Reset {self.instance_name} to default configuration")
+    
+    def apply_preset(self, preset_name: str):
+        """Apply a preset configuration"""
+        presets = {
+            "gathering_focused": {
+                "unlocked": 4,
+                "assignments": {1: "AutoGather", 2: "AutoGather", 3: "AutoGather", 4: "Rally/Manual"}
+            },
+            "rally_focused": {
+                "unlocked": 4, 
+                "assignments": {1: "AutoGather", 2: "Rally/Manual", 3: "Rally/Manual", 4: "Rally/Manual"}
+            },
+            "balanced": {
+                "unlocked": 4,
+                "assignments": {1: "AutoGather", 2: "AutoGather", 3: "Rally/Manual", 4: "Manual Only"}
+            },
+            "manual_control": {
+                "unlocked": 2,
+                "assignments": {1: "Manual Only", 2: "Manual Only"}
+            }
+        }
+        
+        if preset_name in presets:
+            preset = presets[preset_name]
+            self.unlocked_queues = preset["unlocked"]
             
-            queue = self.march_queues[queue_number]
-            if queue.status in [MarchStatus.GATHERING, MarchStatus.RALLY]:
-                operation_type = "rally" if queue.status == MarchStatus.RALLY else "gathering"
-                self.log_message(f"🛑 Force returning queue #{queue_number} from {operation_type}: {reason}")
-                queue.complete_operation()
-                return True
+            for queue_num, assignment in preset["assignments"].items():
+                self.queue_assignments[queue_num] = assignment
             
-            return False
+            print(f"[MarchManager] Applied preset '{preset_name}' to {self.instance_name}")
+            return True
+        
+        return False
+    
+    def validate_configuration(self) -> Dict:
+        """Validate current configuration and return any issues"""
+        issues = []
+        warnings = []
+        
+        # Check if at least one queue is available for gathering
+        gather_queues = self.get_available_gather_queues()
+        if not gather_queues:
+            warnings.append("No queues assigned for AutoGather - resource gathering will be disabled")
+        
+        # Check if rally queues are available for high-level players
+        rally_queues = self.get_available_rally_queues()
+        if self.unlocked_queues >= 3 and not rally_queues:
+            warnings.append("No queues available for rallies - consider assigning some for rally participation")
+        
+        # Check for reasonable distribution
+        if len(gather_queues) == self.unlocked_queues and self.unlocked_queues > 2:
+            warnings.append("All queues assigned to gathering - consider reserving some for rallies/manual use")
+        
+        return {
+            "valid": len(issues) == 0,
+            "issues": issues,
+            "warnings": warnings,
+            "gather_queues": len(gather_queues),
+            "rally_queues": len(rally_queues),
+            "total_unlocked": self.unlocked_queues
+        }
+
+
+# Utility functions
+def get_march_manager(instance_name: str) -> SimplifiedMarchManager:
+    """Get or create march manager for an instance"""
+    return SimplifiedMarchManager(instance_name)
+
+
+def update_march_settings_from_dialog(instance_name: str, settings: Dict) -> bool:
+    """Update march settings from the settings dialog"""
+    try:
+        manager = get_march_manager(instance_name)
+        
+        # Update unlocked queue count
+        unlocked_count = settings.get("unlocked_queues", 2)
+        manager.update_unlocked_queues(unlocked_count)
+        
+        # Update individual queue assignments
+        queue_assignments = settings.get("queue_assignments", {})
+        for queue_str, assignment in queue_assignments.items():
+            queue_num = int(queue_str)
+            manager.update_queue_assignment(queue_num, assignment)
+        
+        # Save configuration
+        manager.save_configuration()
+        
+        # Validate configuration
+        validation = manager.validate_configuration()
+        if validation["warnings"]:
+            print(f"[MarchManager] Configuration warnings for {instance_name}:")
+            for warning in validation["warnings"]:
+                print(f"  - {warning}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"[MarchManager] Error updating march settings: {e}")
+        return False
+
+
+def get_march_configuration_for_dialog(instance_name: str) -> Dict:
+    """Get march configuration formatted for the settings dialog"""
+    try:
+        manager = get_march_manager(instance_name)
+        
+        config = {
+            "unlocked_queues": manager.unlocked_queues,
+            "queue_assignments": {}
+        }
+        
+        # Format assignments for dialog
+        for queue_num in range(1, manager.unlocked_queues + 1):
+            assignment = manager.get_queue_assignment(queue_num)
+            config["queue_assignments"][str(queue_num)] = assignment
+        
+        return config
+        
+    except Exception as e:
+        print(f"[MarchManager] Error getting configuration: {e}")
+        return {"unlocked_queues": 2, "queue_assignments": {"1": "AutoGather", "2": "AutoGather"}}
+
+
+# Export functions
+__all__ = [
+    'SimplifiedMarchManager',
+    'get_march_manager',
+    'update_march_settings_from_dialog',
+    'get_march_configuration_for_dialog'
+]

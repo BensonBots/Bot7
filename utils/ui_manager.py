@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - UPDATED UI Manager with Improved Module Settings
-Added scrollable instance area and updated module settings integration
+BENSON v2.0 - UPDATED UI Manager with Fixed Module Settings Integration
+Added proper integration with the fixed module settings window
 """
 
 import tkinter as tk
@@ -8,7 +8,7 @@ from tkinter import messagebox, ttk
 
 
 class UIManager:
-    """Updated UI manager with improved module settings integration"""
+    """Updated UI manager with fixed module settings integration"""
 
     def __init__(self, app_ref):
         self.app = app_ref
@@ -610,38 +610,62 @@ class UIManager:
             self.app.add_console_message("Instance creation cancelled")
 
     def show_modules(self, instance_name):
-        """Show IMPROVED King Shot module configuration for an instance"""
+        """FIXED: Show improved King Shot module configuration for an instance"""
         try:
-            self.app.add_console_message(f"Opening improved module configuration for: {instance_name}")
+            self.app.add_console_message(f"🔧 Opening module configuration for: {instance_name}")
             self.app.update_idletasks()
             
-            # Try to import the improved module settings first
+            # FIXED: Use the improved module settings with better clickability
             try:
+                # Import the fixed version
                 from gui.dialogs.modules_settings import show_improved_king_shot_module_settings
-                show_improved_king_shot_module_settings(self.app, instance_name, app_ref=self.app)
-                return
-            except ImportError:
-                print("[UIManager] Improved modules settings not found, trying original...")
+                
+                # Show the improved module settings window
+                settings_window = show_improved_king_shot_module_settings(self.app, instance_name, app_ref=self.app)
+                
+                if settings_window:
+                    self.app.add_console_message(f"✅ Module configuration opened for: {instance_name}")
+                else:
+                    self.app.add_console_message(f"❌ Failed to open module configuration for: {instance_name}")
+                    
+                return settings_window
+                
+            except ImportError as e:
+                print(f"[UIManager] Could not import improved modules settings: {e}")
+                # Fallback to original if improved version not available
+                self._show_modules_fallback(instance_name)
             
-            # Fallback to original if improved version not available
+        except Exception as e:
+            print(f"[UIManager] Error showing modules: {e}")
+            messagebox.showerror("Error", f"Could not open modules configuration: {str(e)}")
+            return None
+
+    def _show_modules_fallback(self, instance_name):
+        """Fallback to original module settings if improved version fails"""
+        try:
+            print(f"[UIManager] Using fallback modules settings for {instance_name}")
+            
+            # Try original modules settings
             try:
                 from gui.dialogs.modules_settings import KingShotModuleSettings
                 KingShotModuleSettings(self.app, instance_name, app_ref=self.app)
+                self.app.add_console_message(f"✅ Fallback module configuration opened for: {instance_name}")
             except ImportError:
                 print("[UIManager] Original modules settings not found, trying simple version...")
                 # Final fallback to simple modules window
                 try:
                     from gui.dialogs.modules_window import ModulesWindow
                     ModulesWindow(self.app, instance_name, app_ref=self.app)
+                    self.app.add_console_message(f"✅ Simple module configuration opened for: {instance_name}")
                 except Exception as e:
                     print(f"[UIManager] Error with simple modules: {e}")
-                    messagebox.showerror("Error", f"Could not open modules: {str(e)}")
+                    messagebox.showerror("Error", f"Could not open any module configuration: {str(e)}")
             except Exception as e:
                 print(f"[UIManager] Error with original modules: {e}")
-                messagebox.showerror("Error", f"Could not open modules: {str(e)}")
+                messagebox.showerror("Error", f"Could not open module configuration: {str(e)}")
                 
         except Exception as e:
-            print(f"[UIManager] Error showing modules: {e}")
+            print(f"[UIManager] Error in modules fallback: {e}")
             messagebox.showerror("Error", f"Could not open modules: {str(e)}")
 
     def create_instance_card(self, name, status):
@@ -708,6 +732,22 @@ class UIManager:
                 font=("Segoe UI", 10)
             )
             status_label.pack(side="left", padx=(20, 0))
+
+            # Add modules button to fallback card
+            modules_btn = tk.Button(
+                content_frame,
+                text="⚙ Modules",
+                bg="#2196f3",
+                fg="#ffffff",
+                relief="flat",
+                bd=0,
+                font=("Segoe UI", 9, "bold"),
+                cursor="hand2",
+                padx=10,
+                pady=6,
+                command=lambda: self.show_modules(name)
+            )
+            modules_btn.pack(side="right", padx=(0, 10))
 
             def toggle_checkbox():
                 card.selected = not card.selected
