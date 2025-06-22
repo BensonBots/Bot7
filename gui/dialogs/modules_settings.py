@@ -128,22 +128,47 @@ class KingShotModuleSettings:
         close_btn.bind("<Enter>", on_enter)
         close_btn.bind("<Leave>", on_leave)
     
+
+
     def _setup_sidebar(self):
-        """Setup left sidebar with module list"""
-        # Content container
-        content_container = tk.Frame(self.main_frame, bg="#1e2329")
-        content_container.pack(fill="both", expand=True)
-        
-        # Sidebar
-        self.sidebar = tk.Frame(content_container, bg="#161b22", width=280)
-        self.sidebar.pack(side="left", fill="y")
-        self.sidebar.pack_propagate(False)
-        
+        """Setup left sidebar with module list and scrolling, true horizontal split"""
+        # Only create the container if not already created
+        if not hasattr(self, 'content_container'):
+            self.content_container = tk.Frame(self.main_frame, bg="#1e2329")
+            self.content_container.pack(fill="both", expand=True)
+
+        # Sidebar (with scroll)
+        sidebar_outer = tk.Frame(self.content_container, bg="#161b22", width=280)
+        sidebar_outer.pack(side="left", fill="y")
+        sidebar_outer.pack_propagate(False)
+
+        # Scrollbar for sidebar
+        sidebar_scrollbar = tk.Scrollbar(sidebar_outer, orient="vertical")
+        sidebar_scrollbar.pack(side="right", fill="y")
+
+        # Scrollable canvas for sidebar
+        sidebar_canvas = tk.Canvas(sidebar_outer, bg="#161b22", highlightthickness=0, yscrollcommand=sidebar_scrollbar.set)
+        sidebar_canvas.pack(side="left", fill="both", expand=True)
+
+        sidebar_scrollbar.config(command=sidebar_canvas.yview)
+
+        # Frame inside canvas
+        self.sidebar = tk.Frame(sidebar_canvas, bg="#161b22")
+        sidebar_window = sidebar_canvas.create_window((0,0), window=self.sidebar, anchor="nw")
+
+        def _on_sidebar_configure(event):
+            sidebar_canvas.configure(scrollregion=sidebar_canvas.bbox("all"))
+        self.sidebar.bind("<Configure>", _on_sidebar_configure)
+
+        def _on_sidebar_resize(event):
+            sidebar_canvas.itemconfig(sidebar_window, width=sidebar_outer.winfo_width())
+        sidebar_canvas.bind("<Configure>", _on_sidebar_resize)
+
         # Sidebar header
         sidebar_header = tk.Frame(self.sidebar, bg="#0d1117", height=50)
         sidebar_header.pack(fill="x")
         sidebar_header.pack_propagate(False)
-        
+
         tk.Label(
             sidebar_header,
             text="🔧 Game Modules",
@@ -151,17 +176,36 @@ class KingShotModuleSettings:
             fg="#ffffff",
             font=("Segoe UI", 14, "bold")
         ).pack(pady=15)
-        
+
         # Module list
         self._create_module_list()
-    
+        def _on_sidebar_configure(event):
+            sidebar_canvas.configure(scrollregion=sidebar_canvas.bbox("all"))
+        self.sidebar.bind("<Configure>", _on_sidebar_configure)
+
+        def _on_sidebar_resize(event):
+            sidebar_canvas.itemconfig(sidebar_window, width=sidebar_outer.winfo_width())
+        sidebar_canvas.bind("<Configure>", _on_sidebar_resize)
+
+        # Sidebar header
+        sidebar_header = tk.Frame(self.sidebar, bg="#0d1117", height=50)
+        sidebar_header.pack(fill="x")
+        sidebar_header.pack_propagate(False)
+
+        tk.Label(
+            sidebar_header,
+            text="🔧 Game Modules",
+            bg="#0d1117",
+            fg="#ffffff",
+            font=("Segoe UI", 14, "bold")
+        ).pack(pady=15)
+
+        # Module list
+        self._create_module_list()
+
+
     def _create_module_list(self):
-        """Create the module selection list"""
-        # Scrollable frame for modules
-        self.modules_frame = tk.Frame(self.sidebar, bg="#161b22")
-        self.modules_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        # Module definitions for King Shot
+        """Create the module selection list using only implemented modules"""
         self.modules = [
             {
                 "id": "autostart_game",
@@ -171,14 +215,6 @@ class KingShotModuleSettings:
                 "required": True
             },
             {
-                "id": "auto_battle",
-                "name": "AutoBattle",
-                "icon": "⚔️",
-                "description": "Battle automation and tactics",
-                "required": False,
-                "status": "Coming Soon"
-            },
-            {
                 "id": "auto_collect",
                 "name": "AutoCollect",
                 "icon": "💎",
@@ -186,36 +222,24 @@ class KingShotModuleSettings:
                 "required": False
             },
             {
-                "id": "auto_upgrade",
-                "name": "AutoUpgrade",
-                "icon": "⬆️",
-                "description": "Auto-upgrade weapons and gear",
-                "required": False,
-                "status": "Coming Soon"
+                "id": "auto_gather",
+                "name": "AutoGather",
+                "icon": "⛏️",
+                "description": "Automatically gather resources",
+                "required": False
             },
             {
-                "id": "auto_daily",
-                "name": "AutoDaily",
-                "icon": "📅",
-                "description": "Complete daily missions",
-                "required": False,
-                "status": "Coming Soon"
-            },
-            {
-                "id": "auto_shop",
-                "name": "AutoShop",
-                "icon": "🛒",
-                "description": "Manage shop purchases",
-                "required": False,
-                "status": "Coming Soon"
+                "id": "auto_train",
+                "name": "AutoTrain",
+                "icon": "🏋️",
+                "description": "Automate troop training",
+                "required": False
             }
         ]
-        
         # Create module cards
         self.module_cards = {}
         for module in self.modules:
             self._create_module_card(module)
-    
     def _create_module_card(self, module):
         """Create a module selection card"""
         module_id = module["id"]
@@ -223,7 +247,7 @@ class KingShotModuleSettings:
         is_coming_soon = module.get("status") == "Coming Soon"
         
         # Card frame
-        card = tk.Frame(self.modules_frame, bg="#21262d", relief="solid", bd=1)
+        card = tk.Frame(self.sidebar, bg="#21262d", relief="solid", bd=1)
         card.pack(fill="x", pady=2)
         
         # Card content
@@ -327,20 +351,20 @@ class KingShotModuleSettings:
         else:
             card.configure(bg="#1c2128")
     
+
     def _setup_content_area(self):
-        """Setup right content area"""
-        # Content area
-        self.content_area = tk.Frame(self.main_frame, bg="#1e2329")
-        self.content_area.pack(side="right", fill="both", expand=True)
-        
+        """Setup right content area, as sibling to sidebar in content_container"""
+        # Content area (right pane)
+        self.content_area = tk.Frame(self.content_container, bg="#1e2329")
+        self.content_area.pack(side="left", fill="both", expand=True)
+
         # Content header
         self.content_header = tk.Frame(self.content_area, bg="#1e2329", height=60)
         self.content_header.pack(fill="x", padx=20, pady=(20, 0))
         self.content_header.pack_propagate(False)
-        
+
         # Content body (scrollable)
         self._setup_scrollable_content()
-    
     def _setup_scrollable_content(self):
         """Setup scrollable content area"""
         # Create canvas and scrollbar
@@ -411,7 +435,18 @@ class KingShotModuleSettings:
                 font=("Segoe UI", 16, "bold")
             ).pack(side="left", pady=20)
         
+
         # Show specific module settings
+        if module_id == "autostart_game":
+            self._show_autostart_settings()
+        elif module_id == "auto_collect":
+            self._show_collect_settings()
+        elif module_id == "auto_gather":
+            self._show_gather_settings()
+        elif module_id == "auto_train":
+            self._show_train_settings()
+        else:
+            self._show_coming_soon()
         if module_id == "autostart_game":
             self._show_autostart_settings()
         elif module_id == "auto_collect":
@@ -804,39 +839,3 @@ def show_king_shot_module_settings(parent, instance_name, app_ref=None):
         messagebox.showerror("Error", f"Could not open King Shot module settings: {str(e)}")
         return None
 
-
-# Update the UI manager to use the new window
-def update_ui_manager_for_king_shot():
-    """
-    Update your utils/ui_manager.py file to use the new King Shot module settings.
-    
-    Replace the show_modules method in UIManager class with this:
-    
-    def show_modules(self, instance_name):
-        '''Show King Shot module configuration for an instance'''
-        try:
-            self.app.add_console_message(f"🎯 Opening King Shot module settings for: {instance_name}")
-            
-            self.app.update_idletasks()
-            
-            # Import the NEW King Shot settings window
-            from gui.dialogs.king_shot_modules import show_king_shot_module_settings
-            
-            # Show the new King Shot-specific settings window
-            show_king_shot_module_settings(self.app, instance_name, app_ref=self.app)
-            
-        except ImportError as e:
-            print(f"[UIManager] Could not import King Shot module settings: {e}")
-            # Fallback to simple module window
-            try:
-                from gui.dialogs.modules_window import ModulesWindow
-                ModulesWindow(self.app, instance_name, app_ref=self.app)
-            except Exception as fallback_error:
-                print(f"[UIManager] Fallback also failed: {fallback_error}")
-                messagebox.showerror("Error", f"Could not open modules: {str(e)}")
-                
-        except Exception as e:
-            print(f"[UIManager] Error showing King Shot modules: {e}")
-            messagebox.showerror("Error", f"Could not open modules: {str(e)}")
-    """
-    pass
