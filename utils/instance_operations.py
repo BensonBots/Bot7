@@ -27,6 +27,7 @@ class InstanceOperations:
         self.app.add_console_message(f"🔄 Creating MEmu instance: {name}")
         
         # Create loading card immediately
+        loading_card = None
         try:
             from gui.components.loading_instance_card import create_loading_instance_card
             loading_card = create_loading_instance_card(self.app.instances_container, name)
@@ -51,6 +52,203 @@ class InstanceOperations:
             if hasattr(self.app.ui_manager, 'update_scroll_region'):
                 self.app.ui_manager.update_scroll_region()
                 # Scroll to show new card
+                self.app.after(100, self.app.ui_manager.scroll_to_bottom)
+            
+            print(f"[InstanceOps] ✅ Loading card created for {name}")
+            
+        except Exception as e:
+            print(f"[InstanceOps] ❌ Error creating loading card: {e}")
+            loading_card = None
+
+        # Start creation in background
+        def creation_thread():
+            """Background creation thread"""
+            success = False
+            error_msg = None
+            
+            try:
+                print(f"[InstanceOps] 🔄 Starting background creation for {name}")
+                
+                # This is the slow part - runs in background
+                success = self.app.instance_manager.create_instance_with_name(name)
+                
+                print(f"[InstanceOps] ✅ Background creation result: {success}")
+                
+            except Exception as e:
+                print(f"[InstanceOps] ❌ Background creation error: {e}")
+                error_msg = str(e)
+                success = False
+            
+            # Schedule completion on main thread
+            self.app.after(0, lambda: self._handle_creation_completion(
+                name, loading_card, success, error_msg
+            ))
+        
+        # Start the background thread
+        thread = threading.Thread(target=creation_thread, daemon=True, name=f"Create-{name}")
+        thread.start()
+        
+        print(f"[InstanceOps] 🚀 Creation thread started for {name}")
+
+    def _handle_creation_completion(self, name, loading_card, success, error_msg):
+        """Handle completion with simple card addition - NO REFRESH"""
+        try:
+            print(f"[InstanceOps] 🎯 Handling completion for {name}, success: {success}")
+            
+            if success:
+                # Show success on loading card
+                if loading_card:
+                    loading_card.show_success()
+                    print(f"[InstanceOps] ✅ Showing success for {name}")
+                
+                # Wait for success animation, then add new card
+                self.app.after(1200, lambda: self._add_new_instance_card_simple(name, loading_card))
+                
+            else:
+                # Show error
+                if loading_card:
+                    error_message = error_msg or "Creation failed"
+                    loading_card.show_error(error_message)
+                
+                # Remove loading card after error
+                self.app.after(3000, lambda: self._remove_loading_card(loading_card))
+                
+                # Log error
+                self.app.add_console_message(f"❌ Failed to create {name}: {error_msg or 'Unknown error'}")
+                
+        except Exception as e:
+            print(f"[InstanceOps] ❌ Error handling completion: {e}")
+
+    def _add_new_instance_card_simple(self, name, loading_card):
+        """Simply add the new instance card - SIMPLE VERSION"""
+        try:
+            print(f"[InstanceOps] 🆕 Adding new card for {name} - SIMPLE METHOD")
+            
+            # Get fresh instance data (minimal refresh)
+            print(f"[InstanceOps] 📊 Getting fresh data for {name}")
+            self.app.instance_manager.load_real_instances()
+            instances = self.app.instance_manager.get_instances()
+            
+            # Find our new instance
+            new_instance = None
+            for instance in instances:
+                instance_name = instance["name"]
+                # Check for exact match or partial match (since MEmu renames)
+                if (instance_name == name or 
+                    name in instance_name or 
+                    instance_name in name or
+                    instance_name.lower() == name.lower()):
+                    new_instance = instance
+                    print(f"[InstanceOps] 🎯 Found new instance: {instance_name}")
+                    break
+            
+            if not new_instance:
+                print(f"[InstanceOps] ❌ Could not find new instance {name}")
+                self._remove_loading_card(loading_card)
+                return
+            
+            # Remove loading card first
+            if loading_card and loading_card in self.app.instance_cards:
+                print(f"[InstanceOps] 🗑️ Removing loading card for {name}")
+                self.app.instance_cards.remove(loading_card)
+                loading_card.destroy()
+            
+            # Create the real card
+            print(f"[InstanceOps] 🏗️ Creating real card for {new_instance['name']}")
+            real_card = self.app.ui_manager.create_instance_card(
+                new_instance["name"], 
+                new_instance["status"]
+            )
+            
+            if not real_card:
+                print("[InstanceOps] ❌ Failed to create real card")
+                return
+            
+            # Add to the end of the list
+            self.app.instance_cards.append(real_card)
+            
+            # Position the card at the end
+            card_index = len(self.app.instance_cards) - 1
+            row = card_index // 2
+            col = card_index % 2
+            
+            print(f"[InstanceOps] 📍 Positioning card at row {row}, col {col}")
+            real_card.grid(row=row, column=col, padx=4, pady=2, 
+                         sticky="e" if col == 0 else "w", 
+                         in_=self.app.instances_container)
+            
+            # Add highlight animation
+            self._add_highlight_animation(real_card, new_instance["name"])
+            
+            # Update UI
+            self._update_ui_after_simple_add(new_instance["name"])
+            
+            # NEW: Refresh modules for new instance
+            if hasattr(self.app, 'module_manager'):
+                self.app.module_manager.refresh_modules()
+            
+            print(f"[InstanceOps] ✅ Successfully added new card for {new_instance['name']}")
+            
+        except Exception as e:
+            print(f"[InstanceOps] ❌ Error adding new card: {e}")
+            import traceback
+            traceback.print_exc()
+            if loading_card:
+                self._remove_loading_card(loading_card)
+
+    def _add_highlight_animation(self, card, name):
+        """Add highlight animation to new card"""
+        try:
+            print(f"[InstanceOps] ✨ Adding highlight animation for {name}")
+            
+            if not hasattr(card, 'main_container'):
+                print(f"[InstanceOps] ⚠️ Card has no main_container for {name}")
+                return
+            
+            # Start with normal color
+            original_bg = card.main_container.cget("bg")
+            
+            # Animation sequence: normal -> green -> normal
+            def animate_step(step=0):
+                try:
+                    if not card.winfo_exists():
+                        return
+                    
+                    if step == 0:
+                        # Fade to green
+                        card.main_container.configure(bg="#00ff88")
+                        card.after(400, lambda: animate_step(1))
+                    elif step == 1:
+                        # Fade to lighter green
+                        card.main_container.configure(bg="#33ff99")
+                        card.after(200, lambda: animate_step(2))
+                    elif step == 2:
+                        # Fade back to original
+                        card.main_container.configure(bg=original_bg)
+                        print(f"[InstanceOps] ✅ Highlight animation complete for {name}")
+                    
+                except Exception as e:
+                    print(f"[InstanceOps] Animation error: {e}")
+            
+            # Start animation
+            animate_step()
+            
+        except Exception as e:
+            print(f"[InstanceOps] ❌ Error adding animation: {e}")
+
+    def _update_ui_after_simple_add(self, name):
+        """Update UI after simple card addition"""
+        try:
+            print(f"[InstanceOps] 🔄 Updating UI after adding {name}")
+            
+            # Configure grid
+            if hasattr(self.app, 'instances_container') and self.app.instance_cards:
+                self.app.instances_container.grid_columnconfigure(0, weight=1, minsize=580)
+                self.app.instances_container.grid_columnconfigure(1, weight=1, minsize=580)
+            
+            # Update scroll region
+            if hasattr(self.app.ui_manager, 'update_scroll_region'):
+                self.app.ui_manager.update_scroll_region()
                 self.app.after(100, self.app.ui_manager.scroll_to_bottom)
             
             # Update counter
@@ -325,201 +523,4 @@ class InstanceOperations:
             self.create_instance_with_name(name)
 
     def clone_selected_instance(self):
-        self.app.add_console_message("Clone functionality coming soon...")()
-                self.app.after(100, self.app.ui_manager.scroll_to_bottom)
-            
-            print(f"[InstanceOps] ✅ Loading card created for {name}")
-            
-        except Exception as e:
-            print(f"[InstanceOps] ❌ Error creating loading card: {e}")
-            loading_card = None
-
-        # Start creation in background
-        def creation_thread():
-            """Background creation thread"""
-            success = False
-            error_msg = None
-            
-            try:
-                print(f"[InstanceOps] 🔄 Starting background creation for {name}")
-                
-                # This is the slow part - runs in background
-                success = self.app.instance_manager.create_instance_with_name(name)
-                
-                print(f"[InstanceOps] ✅ Background creation result: {success}")
-                
-            except Exception as e:
-                print(f"[InstanceOps] ❌ Background creation error: {e}")
-                error_msg = str(e)
-                success = False
-            
-            # Schedule completion on main thread
-            self.app.after(0, lambda: self._handle_creation_completion(
-                name, loading_card, success, error_msg
-            ))
-        
-        # Start the background thread
-        thread = threading.Thread(target=creation_thread, daemon=True, name=f"Create-{name}")
-        thread.start()
-        
-        print(f"[InstanceOps] 🚀 Creation thread started for {name}")
-
-    def _handle_creation_completion(self, name, loading_card, success, error_msg):
-        """Handle completion with simple card addition - NO REFRESH"""
-        try:
-            print(f"[InstanceOps] 🎯 Handling completion for {name}, success: {success}")
-            
-            if success:
-                # Show success on loading card
-                if loading_card:
-                    loading_card.show_success()
-                    print(f"[InstanceOps] ✅ Showing success for {name}")
-                
-                # Wait for success animation, then add new card
-                self.app.after(1200, lambda: self._add_new_instance_card_simple(name, loading_card))
-                
-            else:
-                # Show error
-                if loading_card:
-                    error_message = error_msg or "Creation failed"
-                    loading_card.show_error(error_message)
-                
-                # Remove loading card after error
-                self.app.after(3000, lambda: self._remove_loading_card(loading_card))
-                
-                # Log error
-                self.app.add_console_message(f"❌ Failed to create {name}: {error_msg or 'Unknown error'}")
-                
-        except Exception as e:
-            print(f"[InstanceOps] ❌ Error handling completion: {e}")
-
-    def _add_new_instance_card_simple(self, name, loading_card):
-        """Simply add the new instance card - SIMPLE VERSION"""
-        try:
-            print(f"[InstanceOps] 🆕 Adding new card for {name} - SIMPLE METHOD")
-            
-            # Get fresh instance data (minimal refresh)
-            print(f"[InstanceOps] 📊 Getting fresh data for {name}")
-            self.app.instance_manager.load_real_instances()
-            instances = self.app.instance_manager.get_instances()
-            
-            # Find our new instance
-            new_instance = None
-            for instance in instances:
-                instance_name = instance["name"]
-                # Check for exact match or partial match (since MEmu renames)
-                if (instance_name == name or 
-                    name in instance_name or 
-                    instance_name in name or
-                    instance_name.lower() == name.lower()):
-                    new_instance = instance
-                    print(f"[InstanceOps] 🎯 Found new instance: {instance_name}")
-                    break
-            
-            if not new_instance:
-                print(f"[InstanceOps] ❌ Could not find new instance {name}")
-                self._remove_loading_card(loading_card)
-                return
-            
-            # Remove loading card first
-            if loading_card and loading_card in self.app.instance_cards:
-                print(f"[InstanceOps] 🗑️ Removing loading card for {name}")
-                self.app.instance_cards.remove(loading_card)
-                loading_card.destroy()
-            
-            # Create the real card
-            print(f"[InstanceOps] 🏗️ Creating real card for {new_instance['name']}")
-            real_card = self.app.ui_manager.create_instance_card(
-                new_instance["name"], 
-                new_instance["status"]
-            )
-            
-            if not real_card:
-                print("[InstanceOps] ❌ Failed to create real card")
-                return
-            
-            # Add to the end of the list
-            self.app.instance_cards.append(real_card)
-            
-            # Position the card at the end
-            card_index = len(self.app.instance_cards) - 1
-            row = card_index // 2
-            col = card_index % 2
-            
-            print(f"[InstanceOps] 📍 Positioning card at row {row}, col {col}")
-            real_card.grid(row=row, column=col, padx=4, pady=2, 
-                         sticky="e" if col == 0 else "w", 
-                         in_=self.app.instances_container)
-            
-            # Add highlight animation
-            self._add_highlight_animation(real_card, new_instance["name"])
-            
-            # Update UI
-            self._update_ui_after_simple_add(new_instance["name"])
-            
-            # NEW: Refresh modules for new instance
-            if hasattr(self.app, 'module_manager'):
-                self.app.module_manager.refresh_modules()
-            
-            print(f"[InstanceOps] ✅ Successfully added new card for {new_instance['name']}")
-            
-        except Exception as e:
-            print(f"[InstanceOps] ❌ Error adding new card: {e}")
-            import traceback
-            traceback.print_exc()
-            if loading_card:
-                self._remove_loading_card(loading_card)
-
-    def _add_highlight_animation(self, card, name):
-        """Add highlight animation to new card"""
-        try:
-            print(f"[InstanceOps] ✨ Adding highlight animation for {name}")
-            
-            if not hasattr(card, 'main_container'):
-                print(f"[InstanceOps] ⚠️ Card has no main_container for {name}")
-                return
-            
-            # Start with normal color
-            original_bg = card.main_container.cget("bg")
-            
-            # Animation sequence: normal -> green -> normal
-            def animate_step(step=0):
-                try:
-                    if not card.winfo_exists():
-                        return
-                    
-                    if step == 0:
-                        # Fade to green
-                        card.main_container.configure(bg="#00ff88")
-                        card.after(400, lambda: animate_step(1))
-                    elif step == 1:
-                        # Fade to lighter green
-                        card.main_container.configure(bg="#33ff99")
-                        card.after(200, lambda: animate_step(2))
-                    elif step == 2:
-                        # Fade back to original
-                        card.main_container.configure(bg=original_bg)
-                        print(f"[InstanceOps] ✅ Highlight animation complete for {name}")
-                    
-                except Exception as e:
-                    print(f"[InstanceOps] Animation error: {e}")
-            
-            # Start animation
-            animate_step()
-            
-        except Exception as e:
-            print(f"[InstanceOps] ❌ Error adding animation: {e}")
-
-    def _update_ui_after_simple_add(self, name):
-        """Update UI after simple card addition"""
-        try:
-            print(f"[InstanceOps] 🔄 Updating UI after adding {name}")
-            
-            # Configure grid
-            if hasattr(self.app, 'instances_container') and self.app.instance_cards:
-                self.app.instances_container.grid_columnconfigure(0, weight=1, minsize=580)
-                self.app.instances_container.grid_columnconfigure(1, weight=1, minsize=580)
-            
-            # Update scroll region
-            if hasattr(self.app.ui_manager, 'update_scroll_region'):
-                self.app.ui_manager.update_scroll_region
+        self.app.add_console_message("Clone functionality coming soon...")

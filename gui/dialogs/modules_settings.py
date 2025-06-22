@@ -1,4 +1,144 @@
-tk.Spinbox(
+"""
+BENSON v2.0 - Complete Module Settings Window
+Fixed and complete implementation with proper march queue understanding
+"""
+
+import tkinter as tk
+from tkinter import ttk, messagebox
+import json
+import os
+
+
+class CorrectedModuleSettingsWindow:
+    """Complete module settings window with proper march queue understanding"""
+    
+    def __init__(self, parent, instance_name, app_ref=None):
+        self.parent = parent
+        self.instance_name = instance_name
+        self.app_ref = app_ref
+        
+        # Load current settings
+        self.settings_file = f"settings_{instance_name}.json"
+        self.settings = self._load_settings()
+        
+        # Create window
+        self._create_window()
+        
+        # Setup tabbed interface
+        self._setup_tabs()
+        
+        # Load current values
+        self._load_current_values()
+    
+    def _create_window(self):
+        """Create the main settings window"""
+        self.window = tk.Toplevel(self.parent)
+        self.window.title(f"Module Settings - {self.instance_name}")
+        self.window.geometry("900x800")
+        self.window.configure(bg="#1e2329")
+        self.window.transient(self.parent)
+        self.window.grab_set()
+        
+        # Center window
+        self.window.update_idletasks()
+        x = (self.window.winfo_screenwidth() // 2) - (450)
+        y = (self.window.winfo_screenheight() // 2) - (400)
+        self.window.geometry(f"900x800+{x}+{y}")
+        
+        # Main container
+        self.main_frame = tk.Frame(self.window, bg="#1e2329")
+        self.main_frame.pack(fill="both", expand=True, padx=15, pady=15)
+        
+        # Header
+        self._setup_header()
+        
+        # Footer
+        self._setup_footer()
+    
+    def _setup_header(self):
+        """Setup header section"""
+        header = tk.Frame(self.main_frame, bg="#1e2329")
+        header.pack(fill="x", pady=(0, 20))
+        
+        tk.Label(
+            header,
+            text=f"⚙️ Module Configuration: {self.instance_name}",
+            bg="#1e2329",
+            fg="#00d4ff",
+            font=("Segoe UI", 18, "bold")
+        ).pack(side="left")
+        
+        # Instance status
+        if self.app_ref:
+            instance = self.app_ref.instance_manager.get_instance(self.instance_name)
+            status = instance["status"] if instance else "Unknown"
+            status_color = "#00ff88" if status == "Running" else "#8b949e"
+            
+            tk.Label(
+                header,
+                text=f"Status: {status}",
+                bg="#1e2329",
+                fg=status_color,
+                font=("Segoe UI", 12, "bold")
+            ).pack(side="right")
+    
+    def _setup_tabs(self):
+        """Setup tabbed interface"""
+        # Create notebook
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure('TNotebook', background='#1e2329', borderwidth=0)
+        style.configure('TNotebook.Tab', background='#343a46', foreground='#ffffff', 
+                       padding=[15, 10], focuscolor='none')
+        style.map('TNotebook.Tab', background=[('selected', '#00d4ff')], 
+                 foreground=[('selected', '#000000')])
+        
+        self.notebook = ttk.Notebook(self.main_frame)
+        self.notebook.pack(fill="both", expand=True, pady=(0, 20))
+        
+        # Create tabs
+        self._create_autostart_tab()
+        self._create_march_queues_tab()
+        self._create_gathering_tab()
+        self._create_training_tab()
+        self._create_mail_tab()
+    
+    def _create_autostart_tab(self):
+        """AutoStartGame settings"""
+        tab = self._create_scrollable_tab("🎮 AutoStart")
+        
+        self._create_section_header(tab, "🎮 AutoStartGame Configuration")
+        
+        # Auto startup
+        frame = self._create_setting_frame(tab, "Auto-Startup Settings")
+        self.autostart_var = tk.BooleanVar()
+        tk.Checkbutton(
+            frame,
+            text="Automatically start game when instance becomes running",
+            variable=self.autostart_var,
+            bg="#161b22",
+            fg="#ffffff",
+            selectcolor="#161b22",
+            font=("Segoe UI", 11, "bold")
+        ).pack(anchor="w", pady=5)
+        
+        # Max retries
+        retry_frame = self._create_setting_frame(tab, "Retry Configuration")
+        tk.Label(retry_frame, text="Maximum start attempts:", 
+                bg="#161b22", fg="#ffffff", font=("Segoe UI", 10)).pack(anchor="w")
+        self.max_retries_var = tk.StringVar()
+        tk.Spinbox(
+            retry_frame,
+            from_=1, to=10,
+            textvariable=self.max_retries_var,
+            bg="#0a0e16", fg="#ffffff",
+            width=10, font=("Segoe UI", 10)
+        ).pack(anchor="w", pady=(5, 0))
+        
+        tk.Label(retry_frame, text="Delay between retries (seconds):", 
+                bg="#161b22", fg="#ffffff", font=("Segoe UI", 10)).pack(anchor="w", pady=(10, 0))
+        self.retry_delay_var = tk.StringVar()
+        tk.Spinbox(
             retry_frame,
             from_=5, to=60,
             textvariable=self.retry_delay_var,
@@ -853,144 +993,4 @@ def show_corrected_module_settings(parent, instance_name, app_ref=None):
         return window
     except Exception as e:
         messagebox.showerror("Error", f"Could not open settings: {str(e)}")
-        return None"""
-BENSON v2.0 - Corrected Advanced Settings GUI
-March queues are for gathering and rallies only, training is separate
-"""
-
-import tkinter as tk
-from tkinter import ttk, messagebox
-import json
-import os
-
-
-class CorrectedModuleSettingsWindow:
-    """Corrected settings window with proper march queue understanding"""
-    
-    def __init__(self, parent, instance_name, app_ref=None):
-        self.parent = parent
-        self.instance_name = instance_name
-        self.app_ref = app_ref
-        
-        # Load current settings
-        self.settings_file = f"settings_{instance_name}.json"
-        self.settings = self._load_settings()
-        
-        # Create window
-        self._create_window()
-        
-        # Setup tabbed interface
-        self._setup_tabs()
-        
-        # Load current values
-        self._load_current_values()
-    
-    def _create_window(self):
-        """Create the main settings window"""
-        self.window = tk.Toplevel(self.parent)
-        self.window.title(f"Module Settings - {self.instance_name}")
-        self.window.geometry("900x800")
-        self.window.configure(bg="#1e2329")
-        self.window.transient(self.parent)
-        self.window.grab_set()
-        
-        # Center window
-        self.window.update_idletasks()
-        x = (self.window.winfo_screenwidth() // 2) - (450)
-        y = (self.window.winfo_screenheight() // 2) - (400)
-        self.window.geometry(f"900x800+{x}+{y}")
-        
-        # Main container
-        self.main_frame = tk.Frame(self.window, bg="#1e2329")
-        self.main_frame.pack(fill="both", expand=True, padx=15, pady=15)
-        
-        # Header
-        self._setup_header()
-        
-        # Footer
-        self._setup_footer()
-    
-    def _setup_header(self):
-        """Setup header section"""
-        header = tk.Frame(self.main_frame, bg="#1e2329")
-        header.pack(fill="x", pady=(0, 20))
-        
-        tk.Label(
-            header,
-            text=f"⚙️ Module Configuration: {self.instance_name}",
-            bg="#1e2329",
-            fg="#00d4ff",
-            font=("Segoe UI", 18, "bold")
-        ).pack(side="left")
-        
-        # Instance status
-        if self.app_ref:
-            instance = self.app_ref.instance_manager.get_instance(self.instance_name)
-            status = instance["status"] if instance else "Unknown"
-            status_color = "#00ff88" if status == "Running" else "#8b949e"
-            
-            tk.Label(
-                header,
-                text=f"Status: {status}",
-                bg="#1e2329",
-                fg=status_color,
-                font=("Segoe UI", 12, "bold")
-            ).pack(side="right")
-    
-    def _setup_tabs(self):
-        """Setup tabbed interface"""
-        # Create notebook
-        style = ttk.Style()
-        style.theme_use('clam')
-        style.configure('TNotebook', background='#1e2329', borderwidth=0)
-        style.configure('TNotebook.Tab', background='#343a46', foreground='#ffffff', 
-                       padding=[15, 10], focuscolor='none')
-        style.map('TNotebook.Tab', background=[('selected', '#00d4ff')], 
-                 foreground=[('selected', '#000000')])
-        
-        self.notebook = ttk.Notebook(self.main_frame)
-        self.notebook.pack(fill="both", expand=True, pady=(0, 20))
-        
-        # Create tabs
-        self._create_autostart_tab()
-        self._create_march_queues_tab()
-        self._create_gathering_tab()
-        self._create_training_tab()
-        self._create_mail_tab()
-    
-    def _create_autostart_tab(self):
-        """AutoStartGame settings"""
-        tab = self._create_scrollable_tab("🎮 AutoStart")
-        
-        self._create_section_header(tab, "🎮 AutoStartGame Configuration")
-        
-        # Auto startup
-        frame = self._create_setting_frame(tab, "Auto-Startup Settings")
-        self.autostart_var = tk.BooleanVar()
-        tk.Checkbutton(
-            frame,
-            text="Automatically start game when instance becomes running",
-            variable=self.autostart_var,
-            bg="#161b22",
-            fg="#ffffff",
-            selectcolor="#161b22",
-            font=("Segoe UI", 11, "bold")
-        ).pack(anchor="w", pady=5)
-        
-        # Max retries
-        retry_frame = self._create_setting_frame(tab, "Retry Configuration")
-        tk.Label(retry_frame, text="Maximum start attempts:", 
-                bg="#161b22", fg="#ffffff", font=("Segoe UI", 10)).pack(anchor="w")
-        self.max_retries_var = tk.StringVar()
-        tk.Spinbox(
-            retry_frame,
-            from_=1, to=10,
-            textvariable=self.max_retries_var,
-            bg="#0a0e16", fg="#ffffff",
-            width=10, font=("Segoe UI", 10)
-        ).pack(anchor="w", pady=(5, 0))
-        
-        tk.Label(retry_frame, text="Delay between retries (seconds):", 
-                bg="#161b22", fg="#ffffff", font=("Segoe UI", 10)).pack(anchor="w", pady=(10, 0))
-        self.retry_delay_var = tk.StringVar()
-        tk.Spinbox(
+        return None

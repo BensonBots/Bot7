@@ -1,5 +1,5 @@
 """
-BENSON v2.0 - Updated Module Manager for Concurrent Multi-Module System
+BENSON v2.0 - Fixed Module Manager for Concurrent Multi-Module System
 Manages multiple modules running simultaneously with proper coordination
 """
 
@@ -10,8 +10,8 @@ import time
 from typing import Dict, List
 
 
-class MultiModuleManager:
-    """Enhanced module manager for concurrent multi-module execution"""
+class ModuleManager:
+    """Fixed module manager for concurrent multi-module execution"""
     
     def __init__(self, app_ref):
         self.app = app_ref
@@ -29,10 +29,27 @@ class MultiModuleManager:
         try:
             # Import all module classes
             from modules.autostart_game import AutoStartGameModule
-            from modules.auto_gather import AutoGatherModule
-            from modules.auto_train import AutoTrainModule
-            from modules.auto_mail import AutoMailModule
             from modules.base_module import ConcurrentModuleManager
+            
+            # Try to import optional modules
+            AutoGatherModule = None
+            AutoTrainModule = None
+            AutoMailModule = None
+            
+            try:
+                from modules.auto_gather import AutoGatherModule
+            except ImportError:
+                self.app.add_console_message("⚠️ AutoGather module not available")
+            
+            try:
+                from modules.auto_train import AutoTrainModule
+            except ImportError:
+                self.app.add_console_message("⚠️ AutoTrain module not available")
+            
+            try:
+                from modules.auto_mail import AutoMailModule
+            except ImportError:
+                self.app.add_console_message("⚠️ AutoMail module not available")
             
             instances = self.app.instance_manager.get_instances()
             
@@ -55,27 +72,30 @@ class MultiModuleManager:
                 autostart_config["enabled"] = True  # Always enabled
                 manager.register_module(AutoStartGameModule, **autostart_config)
                 
-                # Register AutoGather if enabled
-                gather_config = settings.get("auto_gather", {})
-                if gather_config.get("enabled", True):
-                    manager.register_module(AutoGatherModule, **gather_config)
+                # Register AutoGather if available and enabled
+                if AutoGatherModule:
+                    gather_config = settings.get("auto_gather", {})
+                    if gather_config.get("enabled", True):
+                        manager.register_module(AutoGatherModule, **gather_config)
                 
-                # Register AutoTrain if enabled
-                train_config = settings.get("auto_train", {})
-                if train_config.get("enabled", True):
-                    manager.register_module(AutoTrainModule, **train_config)
+                # Register AutoTrain if available and enabled
+                if AutoTrainModule:
+                    train_config = settings.get("auto_train", {})
+                    if train_config.get("enabled", True):
+                        manager.register_module(AutoTrainModule, **train_config)
                 
-                # Register AutoMail if enabled
-                mail_config = settings.get("auto_mail", {})
-                if mail_config.get("enabled", True):
-                    manager.register_module(AutoMailModule, **mail_config)
+                # Register AutoMail if available and enabled
+                if AutoMailModule:
+                    mail_config = settings.get("auto_mail", {})
+                    if mail_config.get("enabled", True):
+                        manager.register_module(AutoMailModule, **mail_config)
                 
                 self.instance_managers[instance_name] = manager
                 
-                self.app.add_console_message(f"🔧 Initialized multi-module system for {instance_name}")
+                self.app.add_console_message(f"🔧 Initialized module system for {instance_name}")
             
             self.initialization_complete = True
-            self.app.add_console_message(f"✅ Multi-module system ready for {len(self.instance_managers)} instances")
+            self.app.add_console_message(f"✅ Module system ready for {len(self.instance_managers)} instances")
             
             # Start status monitoring
             self._start_status_monitoring()
@@ -83,17 +103,17 @@ class MultiModuleManager:
         except ImportError as e:
             self.app.add_console_message(f"❌ Module import error: {e}")
         except Exception as e:
-            self.app.add_console_message(f"❌ Multi-module initialization error: {e}")
+            self.app.add_console_message(f"❌ Module initialization error: {e}")
     
     def check_auto_startup_initial(self):
         """Initial auto-startup check for all instances"""
         if not self.initialization_complete:
-            self.app.add_console_message("⏳ Multi-module system not ready, deferring auto-startup...")
+            self.app.add_console_message("⏳ Module system not ready, deferring auto-startup...")
             self.app.after(2000, self.check_auto_startup_initial)
             return
         
         try:
-            self.app.add_console_message("🔍 Initial multi-module auto-startup check...")
+            self.app.add_console_message("🔍 Initial module auto-startup check...")
             
             # Force refresh instance statuses
             self.app.instance_manager.update_instance_statuses()
@@ -109,24 +129,24 @@ class MultiModuleManager:
                     instance = self.app.instance_manager.get_instance(instance_name)
                     if instance and instance["status"] == "Running":
                         auto_start_candidates.append(instance_name)
-                        self.app.add_console_message(f"✅ {instance_name} ready for multi-module auto-startup")
+                        self.app.add_console_message(f"✅ {instance_name} ready for module auto-startup")
             
             if auto_start_candidates:
-                self.app.add_console_message(f"🚀 Starting multi-module systems: {', '.join(auto_start_candidates)}")
+                self.app.add_console_message(f"🚀 Starting module systems: {', '.join(auto_start_candidates)}")
                 
                 for instance_name in auto_start_candidates:
                     # Stagger the starts
                     delay = auto_start_candidates.index(instance_name) * 3000
                     self.app.after(delay, lambda name=instance_name: self._start_all_modules_for_instance(name))
             else:
-                self.app.add_console_message("📱 No running instances configured for multi-module auto-startup")
+                self.app.add_console_message("📱 No running instances configured for module auto-startup")
                 
         except Exception as e:
-            self.app.add_console_message(f"❌ Initial multi-module auto-startup error: {e}")
+            self.app.add_console_message(f"❌ Initial module auto-startup error: {e}")
     
     def trigger_auto_startup_for_instance(self, instance_name: str):
         """Trigger auto-startup for specific instance (called when instance starts)"""
-        self.app.add_console_message(f"🎯 Multi-module auto-startup triggered for {instance_name}")
+        self.app.add_console_message(f"🎯 Module auto-startup triggered for {instance_name}")
         
         # Delay to ensure instance is fully started
         self.app.after(5000, lambda: self._start_all_modules_for_instance(instance_name))
@@ -141,7 +161,7 @@ class MultiModuleManager:
             # Final verification that instance is still running
             instance = self.app.instance_manager.get_instance(instance_name)
             if not instance or instance["status"] != "Running":
-                self.app.add_console_message(f"⏸ {instance_name} not running, aborting multi-module startup")
+                self.app.add_console_message(f"⏸ {instance_name} not running, aborting module startup")
                 return
             
             manager = self.instance_managers[instance_name]
@@ -152,15 +172,15 @@ class MultiModuleManager:
                 self.app.add_console_message(f"⏸ Auto-startup not enabled for {instance_name}")
                 return
             
-            self.app.add_console_message(f"🎮 Starting multi-module system for {instance_name}...")
+            self.app.add_console_message(f"🎮 Starting module system for {instance_name}...")
             
             # Start all enabled modules
             success = manager.start_all_enabled()
             
             if success:
-                self.app.add_console_message(f"✅ Multi-module system started for {instance_name}")
+                self.app.add_console_message(f"✅ Module system started for {instance_name}")
             else:
-                self.app.add_console_message(f"❌ Failed to start multi-module system for {instance_name}")
+                self.app.add_console_message(f"❌ Failed to start module system for {instance_name}")
                 
         except Exception as e:
             self.app.add_console_message(f"❌ Error starting modules for {instance_name}: {e}")
@@ -210,11 +230,11 @@ class MultiModuleManager:
                                     manager.stop_all()
                     
                 except Exception as e:
-                    print(f"[MultiModuleManager] Status monitor error: {e}")
+                    print(f"[ModuleManager] Status monitor error: {e}")
                     
-        self.status_monitor_thread = threading.Thread(target=monitor_loop, daemon=True, name="MultiModuleStatusMonitor")
+        self.status_monitor_thread = threading.Thread(target=monitor_loop, daemon=True, name="ModuleStatusMonitor")
         self.status_monitor_thread.start()
-        self.app.add_console_message("🔍 Started multi-module status monitoring")
+        self.app.add_console_message("🔍 Started module status monitoring")
     
     def _load_instance_settings(self, instance_name: str) -> Dict:
         """Load settings for a specific instance"""
@@ -343,7 +363,7 @@ class MultiModuleManager:
                     del self.instance_managers[instance_name]
                 if instance_name in self.settings_cache:
                     del self.settings_cache[instance_name]
-                self.app.add_console_message(f"🗑 Removed multi-module system for deleted instance: {instance_name}")
+                self.app.add_console_message(f"🗑 Removed module system for deleted instance: {instance_name}")
             
             # Add managers for new instances
             for instance in current_instances:
@@ -370,22 +390,22 @@ class MultiModuleManager:
                         
                         self.instance_managers[instance_name] = manager
                         
-                        self.app.add_console_message(f"➕ Added multi-module system for new instance: {instance_name}")
+                        self.app.add_console_message(f"➕ Added module system for new instance: {instance_name}")
                         
                     except Exception as e:
                         self.app.add_console_message(f"❌ Failed to create module system for {instance_name}: {e}")
             
-            self.app.add_console_message(f"🔄 Refreshed multi-module systems for {len(current_instances)} instances")
+            self.app.add_console_message(f"🔄 Refreshed module systems for {len(current_instances)} instances")
             
         except Exception as e:
-            self.app.add_console_message(f"❌ Multi-module refresh error: {e}")
+            self.app.add_console_message(f"❌ Module refresh error: {e}")
     
     def reload_instance_settings(self, instance_name: str):
         """Reload settings for a specific instance"""
         try:
             settings = self._load_instance_settings(instance_name)
             self.settings_cache[instance_name] = settings
-            self.app.add_console_message(f"🔄 Reloaded multi-module settings for {instance_name}")
+            self.app.add_console_message(f"🔄 Reloaded module settings for {instance_name}")
         except Exception as e:
             self.app.add_console_message(f"❌ Failed to reload settings for {instance_name}: {e}")
     
@@ -407,7 +427,7 @@ class MultiModuleManager:
     
     # Legacy compatibility methods
     def check_auto_startup(self):
-        """Legacy method - redirect to new multi-module system"""
+        """Legacy method - redirect to new module system"""
         self.check_auto_startup_initial()
     
     def get_autostart_module(self, instance_name: str):

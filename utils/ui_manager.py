@@ -610,14 +610,28 @@ class UIManager:
             self.app.add_console_message("Instance creation cancelled")
     
     def show_modules(self, instance_name):
-        """Show modules window for an instance with FIXED positioning"""
+        """Show NEW comprehensive modules window for an instance"""
         try:
-            self.app.add_console_message(f"Opening module configuration for: {instance_name}")
+            self.app.add_console_message(f"Opening advanced module configuration for: {instance_name}")
             
             self.app.update_idletasks()
             
-            from gui.dialogs.modules_window import ModulesWindow
-            ModulesWindow(self.app, instance_name, app_ref=self.app)
+            # Import the NEW comprehensive settings window
+            from gui.dialogs.modules_settings import show_corrected_module_settings
+            
+            # Show the new advanced settings window
+            show_corrected_module_settings(self.app, instance_name, app_ref=self.app)
+            
+        except ImportError as e:
+            print(f"[UIManager] Could not import new module settings: {e}")
+            # Fallback to old module window if new one fails
+            try:
+                from gui.dialogs.modules_window import ModulesWindow
+                ModulesWindow(self.app, instance_name, app_ref=self.app)
+            except Exception as fallback_error:
+                print(f"[UIManager] Fallback also failed: {fallback_error}")
+                messagebox.showerror("Error", f"Could not open modules: {str(e)}")
+                
         except Exception as e:
             print(f"[UIManager] Error showing modules: {e}")
             messagebox.showerror("Error", f"Could not open modules: {str(e)}")
