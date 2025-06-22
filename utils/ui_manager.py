@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - FIXED UI Manager with Scrollable Instance Area
-Added scrollable canvas for many instances and fixed positioning
+BENSON v2.0 - UPDATED UI Manager with Improved Module Settings
+Added scrollable instance area and updated module settings integration
 """
 
 import tkinter as tk
@@ -8,7 +8,7 @@ from tkinter import messagebox, ttk
 
 
 class UIManager:
-    """FIXED UI manager with scrollable instance area"""
+    """Updated UI manager with improved module settings integration"""
 
     def __init__(self, app_ref):
         self.app = app_ref
@@ -290,16 +290,16 @@ class UIManager:
         return click_map.get(color, color)
 
     def setup_main_content(self):
-        """FIXED: Setup scrollable main content area for many instances"""
+        """Setup scrollable main content area for many instances"""
         # Main content frame
         main_frame = tk.Frame(self.app, bg="#0a0e16")
         main_frame.pack(fill="both", expand=True, padx=10)
 
-        # FIXED: Create scrollable area for instances
+        # Create scrollable area for instances
         self._create_scrollable_instances_area(main_frame)
 
     def _create_scrollable_instances_area(self, parent):
-        """FIXED: Create scrollable canvas area for instances"""
+        """Create scrollable canvas area for instances"""
         # Container for canvas and scrollbar
         scroll_container = tk.Frame(parent, bg="#0a0e16")
         scroll_container.pack(fill="both", expand=True)
@@ -391,7 +391,7 @@ class UIManager:
         self.rebind_mousewheel = rebind_mousewheel
 
     def update_scroll_region(self):
-        """FIXED: Update scroll region after adding/removing instances"""
+        """Update scroll region after adding/removing instances"""
         try:
             if self.instances_canvas and self.instances_canvas.winfo_exists():
                 # Update scroll region
@@ -502,7 +502,7 @@ class UIManager:
             print(f"[UIManager] Error closing: {e}")
 
     def make_draggable_safe(self, widget):
-        """FIXED: Simplified dragging without event conflicts"""
+        """Simplified dragging without event conflicts"""
         def start_drag(event):
             try:
                 if event.num != 1:
@@ -574,7 +574,7 @@ class UIManager:
             print(f"[UIManager] Error toggling console: {e}")
 
     def create_instance_with_enhanced_dialog(self):
-        """Create instance using the enhanced dialog with FIXED positioning"""
+        """Create instance using the enhanced dialog"""
         try:
             from gui.dialogs.create_instance_dialog import show_create_instance_dialog
 
@@ -609,42 +609,43 @@ class UIManager:
         else:
             self.app.add_console_message("Instance creation cancelled")
 
-
-    
-
     def show_modules(self, instance_name):
-        """Show King Shot module configuration for an instance"""
+        """Show IMPROVED King Shot module configuration for an instance"""
         try:
-            self.app.add_console_message(f"Opening advanced module configuration for: {instance_name}")
+            self.app.add_console_message(f"Opening improved module configuration for: {instance_name}")
             self.app.update_idletasks()
-            from gui.dialogs.modules_settings import KingShotModuleSettings
-            KingShotModuleSettings(self.app, instance_name, app_ref=self.app)
-        except Exception as e:
-            print(f"[UIManager] Error showing modules: {e}")
-            messagebox.showerror("Error", f"Could not open modules: {str(e)}")
-        """Show NEW comprehensive modules window for an instance"""
-        try:
-            self.app.add_console_message(f"Opening advanced module configuration for: {instance_name}")
-            self.app.update_idletasks()
-            from gui.dialogs.modules_settings import KingShotModuleSettings
-            KingShotModuleSettings(self.app, instance_name, app_ref=self.app)
-        except Exception as e:
-            print(f"[UIManager] Error showing modules: {e}")
-            messagebox.showerror("Error", f"Could not open modules: {str(e)}")
-
-
-        """Show NEW comprehensive modules window for an instance"""
-        try:
-            self.app.add_console_message(f"Opening advanced module configuration for: {instance_name}")
-            self.app.update_idletasks()
-            from gui.dialogs.modules_settings import KingShotModuleSettings
-            KingShotModuleSettings(self.app, instance_name, app_ref=self.app)
+            
+            # Try to import the improved module settings first
+            try:
+                from gui.dialogs.modules_settings import show_improved_king_shot_module_settings
+                show_improved_king_shot_module_settings(self.app, instance_name, app_ref=self.app)
+                return
+            except ImportError:
+                print("[UIManager] Improved modules settings not found, trying original...")
+            
+            # Fallback to original if improved version not available
+            try:
+                from gui.dialogs.modules_settings import KingShotModuleSettings
+                KingShotModuleSettings(self.app, instance_name, app_ref=self.app)
+            except ImportError:
+                print("[UIManager] Original modules settings not found, trying simple version...")
+                # Final fallback to simple modules window
+                try:
+                    from gui.dialogs.modules_window import ModulesWindow
+                    ModulesWindow(self.app, instance_name, app_ref=self.app)
+                except Exception as e:
+                    print(f"[UIManager] Error with simple modules: {e}")
+                    messagebox.showerror("Error", f"Could not open modules: {str(e)}")
+            except Exception as e:
+                print(f"[UIManager] Error with original modules: {e}")
+                messagebox.showerror("Error", f"Could not open modules: {str(e)}")
+                
         except Exception as e:
             print(f"[UIManager] Error showing modules: {e}")
             messagebox.showerror("Error", f"Could not open modules: {str(e)}")
 
     def create_instance_card(self, name, status):
-        """FIXED: Create a new instance card with correct import"""
+        """Create a new instance card with correct import"""
         try:
             from core.components.instance_card import InstanceCard
 
@@ -659,7 +660,7 @@ class UIManager:
                 app_ref=self.app
             )
 
-            # FIXED: Update scroll region after adding card
+            # Update scroll region after adding card
             self.app.after_idle(self.update_scroll_region)
 
             print(f"[UIManager] Successfully created instance card for {name}")
