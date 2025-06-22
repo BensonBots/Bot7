@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - Fixed Module Manager
-Fixed auto-startup logic and timing issues
+BENSON v2.0 - Updated Module Manager for Concurrent Multi-Module System
+Manages multiple modules running simultaneously with proper coordination
 """
 
 import os
@@ -10,184 +10,211 @@ import time
 from typing import Dict, List
 
 
-class ModuleManager:
-    """Fixed module manager with proper auto-startup timing"""
+class MultiModuleManager:
+    """Enhanced module manager for concurrent multi-module execution"""
     
     def __init__(self, app_ref):
         self.app = app_ref
-        self.autostart_modules = {}
+        self.instance_managers = {}  # instance_name -> ConcurrentModuleManager
         self.settings_cache = {}
         self.initialization_complete = False
-        self.auto_startup_pending = False
+        
+        # Status monitoring
+        self.status_monitor_running = False
+        self.status_monitor_thread = None
+        self.status_monitor_stop = threading.Event()
     
     def initialize_modules(self):
-        """Initialize modules for all instances"""
+        """Initialize all modules for all instances"""
         try:
+            # Import all module classes
             from modules.autostart_game import AutoStartGameModule
+            from modules.auto_gather import AutoGatherModule
+            from modules.auto_train import AutoTrainModule
+            from modules.auto_mail import AutoMailModule
+            from modules.base_module import ConcurrentModuleManager
             
             instances = self.app.instance_manager.get_instances()
             
             for instance in instances:
                 instance_name = instance["name"]
                 
-                # Create module with proper error handling
-                try:
-                    autostart_module = AutoStartGameModule(
-                        self.app.instance_manager,
-                        console_callback=self.app.add_console_message
-                    )
-                    
-                    self.autostart_modules[instance_name] = autostart_module
-                    settings = self._load_instance_settings(instance_name)
-                    self.settings_cache[instance_name] = settings
-                    
-                except Exception as e:
-                    self.app.add_console_message(f"❌ Failed to initialize module for {instance_name}: {e}")
-                    continue
+                # Create concurrent module manager for this instance
+                manager = ConcurrentModuleManager(
+                    instance_name=instance_name,
+                    instance_manager=self.app.instance_manager,
+                    console_callback=self.app.add_console_message
+                )
+                
+                # Load settings for this instance
+                settings = self._load_instance_settings(instance_name)
+                self.settings_cache[instance_name] = settings
+                
+                # Register AutoStartGame (always required)
+                autostart_config = settings.get("autostart_game", {})
+                autostart_config["enabled"] = True  # Always enabled
+                manager.register_module(AutoStartGameModule, **autostart_config)
+                
+                # Register AutoGather if enabled
+                gather_config = settings.get("auto_gather", {})
+                if gather_config.get("enabled", True):
+                    manager.register_module(AutoGatherModule, **gather_config)
+                
+                # Register AutoTrain if enabled
+                train_config = settings.get("auto_train", {})
+                if train_config.get("enabled", True):
+                    manager.register_module(AutoTrainModule, **train_config)
+                
+                # Register AutoMail if enabled
+                mail_config = settings.get("auto_mail", {})
+                if mail_config.get("enabled", True):
+                    manager.register_module(AutoMailModule, **mail_config)
+                
+                self.instance_managers[instance_name] = manager
+                
+                self.app.add_console_message(f"🔧 Initialized multi-module system for {instance_name}")
             
             self.initialization_complete = True
-            self.app.add_console_message(f"🔧 Initialized modules for {len(self.autostart_modules)} instances")
+            self.app.add_console_message(f"✅ Multi-module system ready for {len(self.instance_managers)} instances")
+            
+            # Start status monitoring
+            self._start_status_monitoring()
             
         except ImportError as e:
-            self.app.add_console_message(f"❌ AutoStartGame module not available: {e}")
+            self.app.add_console_message(f"❌ Module import error: {e}")
         except Exception as e:
-            self.app.add_console_message(f"❌ Module initialization error: {e}")
+            self.app.add_console_message(f"❌ Multi-module initialization error: {e}")
     
-    def check_auto_startup(self):
-        """FIXED: Check and start auto-startup modules with proper timing"""
+    def check_auto_startup_initial(self):
+        """Initial auto-startup check for all instances"""
         if not self.initialization_complete:
-            self.app.add_console_message("⏳ Module initialization not complete, deferring auto-startup...")
-            self.auto_startup_pending = True
-            # Try again in 2 seconds
-            self.app.after(2000, self.check_auto_startup)
+            self.app.add_console_message("⏳ Multi-module system not ready, deferring auto-startup...")
+            self.app.after(2000, self.check_auto_startup_initial)
             return
         
         try:
-            self.app.add_console_message("🔍 Checking auto-startup configuration...")
+            self.app.add_console_message("🔍 Initial multi-module auto-startup check...")
             
-            # Force refresh instance statuses first
+            # Force refresh instance statuses
             self.app.instance_manager.update_instance_statuses()
-            time.sleep(0.5)  # Small delay for status update
+            time.sleep(0.5)
             
             auto_start_candidates = []
             
-            for instance_name, settings in self.settings_cache.items():
+            for instance_name, manager in self.instance_managers.items():
+                settings = self.settings_cache.get(instance_name, {})
                 autostart_settings = settings.get("autostart_game", {})
                 
-                if (autostart_settings.get("auto_startup", False) and 
-                    autostart_settings.get("enabled", True)):
-                    
-                    # Double-check instance status
+                if autostart_settings.get("auto_startup", False):
                     instance = self.app.instance_manager.get_instance(instance_name)
-                    if instance:
-                        real_status = self.app.instance_manager._get_real_instance_status(
-                            instance["index"], instance["name"]
-                        )
-                        
-                        if real_status == "Running":
-                            auto_start_candidates.append(instance_name)
-                            self.app.add_console_message(f"✅ {instance_name} is running and configured for auto-startup")
-                        else:
-                            self.app.add_console_message(f"⏸ {instance_name} has auto-startup enabled but is {real_status}")
-                    else:
-                        self.app.add_console_message(f"❌ {instance_name} not found in instance list")
+                    if instance and instance["status"] == "Running":
+                        auto_start_candidates.append(instance_name)
+                        self.app.add_console_message(f"✅ {instance_name} ready for multi-module auto-startup")
             
             if auto_start_candidates:
-                self.app.add_console_message(f"🚀 Starting auto-startup for: {', '.join(auto_start_candidates)}")
+                self.app.add_console_message(f"🚀 Starting multi-module systems: {', '.join(auto_start_candidates)}")
                 
-                # Start auto-startup with proper delay
-                def delayed_start():
-                    # Wait for everything to stabilize
-                    time.sleep(3)
-                    
-                    for instance_name in auto_start_candidates:
-                        # Final status check before starting
-                        instance = self.app.instance_manager.get_instance(instance_name)
-                        if instance:
-                            current_status = self.app.instance_manager._get_real_instance_status(
-                                instance["index"], instance["name"]
-                            )
-                            
-                            if current_status == "Running":
-                                # Schedule on main thread
-                                self.app.after(0, lambda name=instance_name: self._auto_start_instance(name))
-                            else:
-                                self.app.after(0, lambda name=instance_name, status=current_status: 
-                                             self.app.add_console_message(f"⏸ {name} status changed to {status}, skipping auto-startup"))
-                        
-                        time.sleep(1)  # Stagger starts
-                
-                threading.Thread(target=delayed_start, daemon=True).start()
+                for instance_name in auto_start_candidates:
+                    # Stagger the starts
+                    delay = auto_start_candidates.index(instance_name) * 3000
+                    self.app.after(delay, lambda name=instance_name: self._start_all_modules_for_instance(name))
             else:
-                self.app.add_console_message("📱 No running instances configured for auto-startup")
-            
-            self.auto_startup_pending = False
+                self.app.add_console_message("📱 No running instances configured for multi-module auto-startup")
                 
         except Exception as e:
-            self.app.add_console_message(f"❌ Auto-startup check error: {e}")
-            self.auto_startup_pending = False
+            self.app.add_console_message(f"❌ Initial multi-module auto-startup error: {e}")
     
-    def _auto_start_instance(self, instance_name: str):
-        """FIXED: Auto-start with better error handling and status checks"""
+    def trigger_auto_startup_for_instance(self, instance_name: str):
+        """Trigger auto-startup for specific instance (called when instance starts)"""
+        self.app.add_console_message(f"🎯 Multi-module auto-startup triggered for {instance_name}")
+        
+        # Delay to ensure instance is fully started
+        self.app.after(5000, lambda: self._start_all_modules_for_instance(instance_name))
+    
+    def _start_all_modules_for_instance(self, instance_name: str):
+        """Start all enabled modules for an instance"""
         try:
-            if instance_name not in self.autostart_modules:
-                self.app.add_console_message(f"❌ No AutoStartGame module for {instance_name}")
+            if instance_name not in self.instance_managers:
+                self.app.add_console_message(f"❌ No module manager for {instance_name}")
                 return
             
-            # Triple check - make sure instance is still running
+            # Final verification that instance is still running
             instance = self.app.instance_manager.get_instance(instance_name)
-            if not instance:
-                self.app.add_console_message(f"❌ {instance_name} not found, aborting auto-startup")
+            if not instance or instance["status"] != "Running":
+                self.app.add_console_message(f"⏸ {instance_name} not running, aborting multi-module startup")
                 return
             
-            # Check real status one more time
-            real_status = self.app.instance_manager._get_real_instance_status(
-                instance["index"], instance["name"]
-            )
-            
-            if real_status != "Running":
-                self.app.add_console_message(f"⏸ {instance_name} is {real_status}, aborting auto-startup")
-                return
-            
-            autostart_module = self.autostart_modules[instance_name]
-            
-            # Check if module is available
-            if not autostart_module.is_available():
-                missing_deps = autostart_module.get_missing_dependencies()
-                self.app.add_console_message(f"❌ {instance_name} auto-startup failed: Missing {', '.join(missing_deps)}")
-                return
-            
-            # Check if already running
-            running_instances = autostart_module.get_running_instances()
-            if instance_name in running_instances:
-                self.app.add_console_message(f"⚠️ {instance_name} AutoStartGame already running")
-                return
-            
-            # Get settings
+            manager = self.instance_managers[instance_name]
             settings = self.settings_cache.get(instance_name, {})
-            autostart_settings = settings.get("autostart_game", {})
-            max_retries = autostart_settings.get("max_retries", 3)
             
-            self.app.add_console_message(f"🎮 Auto-starting AutoStartGame for {instance_name}...")
+            # Check if auto-startup is enabled
+            if not settings.get("autostart_game", {}).get("auto_startup", False):
+                self.app.add_console_message(f"⏸ Auto-startup not enabled for {instance_name}")
+                return
             
-            def on_complete(success):
-                if success:
-                    self.app.add_console_message(f"✅ {instance_name} auto-startup completed successfully")
-                else:
-                    self.app.add_console_message(f"❌ {instance_name} auto-startup failed")
+            self.app.add_console_message(f"🎮 Starting multi-module system for {instance_name}...")
             
-            # Start the module
-            success = autostart_module.start_auto_game(
-                instance_name,
-                max_retries=max_retries,
-                on_complete=on_complete
-            )
+            # Start all enabled modules
+            success = manager.start_all_enabled()
             
-            if not success:
-                self.app.add_console_message(f"❌ Failed to start AutoStartGame for {instance_name}")
+            if success:
+                self.app.add_console_message(f"✅ Multi-module system started for {instance_name}")
+            else:
+                self.app.add_console_message(f"❌ Failed to start multi-module system for {instance_name}")
                 
         except Exception as e:
-            self.app.add_console_message(f"❌ {instance_name} auto-startup error: {e}")
+            self.app.add_console_message(f"❌ Error starting modules for {instance_name}: {e}")
+    
+    def _start_status_monitoring(self):
+        """Start background status monitoring"""
+        if self.status_monitor_running:
+            return
+            
+        self.status_monitor_running = True
+        
+        def monitor_loop():
+            while self.status_monitor_running:
+                try:
+                    time.sleep(10)  # Check every 10 seconds
+                    
+                    if not self.initialization_complete:
+                        continue
+                    
+                    # Monitor each instance's modules
+                    current_instances = self.app.instance_manager.get_instances()
+                    
+                    for instance in current_instances:
+                        instance_name = instance["name"]
+                        current_status = instance["status"]
+                        
+                        if instance_name in self.instance_managers:
+                            manager = self.instance_managers[instance_name]
+                            
+                            # If instance became running and modules aren't running
+                            if current_status == "Running":
+                                status_report = manager.get_status_report()
+                                running_modules = status_report.get("running_modules", 0)
+                                
+                                # If no modules running but should be
+                                if running_modules == 0:
+                                    settings = self.settings_cache.get(instance_name, {})
+                                    if settings.get("autostart_game", {}).get("auto_startup", False):
+                                        self.app.add_console_message(f"🔄 Restarting modules for {instance_name}")
+                                        self.app.after(0, lambda name=instance_name: self._start_all_modules_for_instance(name))
+                            
+                            # If instance stopped, stop modules
+                            elif current_status != "Running":
+                                status_report = manager.get_status_report()
+                                if status_report.get("running_modules", 0) > 0:
+                                    self.app.add_console_message(f"⏹ Stopping modules for stopped instance: {instance_name}")
+                                    manager.stop_all()
+                    
+                except Exception as e:
+                    print(f"[MultiModuleManager] Status monitor error: {e}")
+                    
+        self.status_monitor_thread = threading.Thread(target=monitor_loop, daemon=True, name="MultiModuleStatusMonitor")
+        self.status_monitor_thread.start()
+        self.app.add_console_message("🔍 Started multi-module status monitoring")
     
     def _load_instance_settings(self, instance_name: str) -> Dict:
         """Load settings for a specific instance"""
@@ -198,6 +225,30 @@ class ModuleManager:
                 "max_retries": 3,
                 "retry_delay": 10,
                 "enabled": True
+            },
+            "auto_gather": {
+                "enabled": True,
+                "check_interval": 30,
+                "resource_types": ["food", "wood", "iron", "stone"],
+                "min_march_capacity": 100000,
+                "max_concurrent_gathers": 5
+            },
+            "auto_train": {
+                "enabled": True,
+                "check_interval": 60,
+                "troop_types": ["infantry", "ranged", "cavalry", "siege"],
+                "training_priority": ["infantry", "ranged", "cavalry"],
+                "max_training_queues": 4,
+                "min_resource_threshold": 50000
+            },
+            "auto_mail": {
+                "enabled": True,
+                "check_interval": 120,
+                "claim_resources": True,
+                "claim_items": True,
+                "claim_speedups": True,
+                "claim_gems": True,
+                "delete_read_mail": False
             }
         }
         
@@ -219,9 +270,63 @@ class ModuleManager:
         
         return default_settings
     
-    def get_autostart_module(self, instance_name: str):
-        """Get AutoStartGame module for an instance"""
-        return self.autostart_modules.get(instance_name)
+    def get_module_manager(self, instance_name: str):
+        """Get module manager for specific instance"""
+        return self.instance_managers.get(instance_name)
+    
+    def get_instance_status(self, instance_name: str) -> Dict:
+        """Get comprehensive status for an instance"""
+        if instance_name not in self.instance_managers:
+            return {"error": "Instance not found"}
+        
+        manager = self.instance_managers[instance_name]
+        return manager.get_status_report()
+    
+    def get_all_status(self) -> Dict:
+        """Get status for all instances"""
+        status = {
+            "total_instances": len(self.instance_managers),
+            "initialization_complete": self.initialization_complete,
+            "status_monitoring": self.status_monitor_running,
+            "instances": {}
+        }
+        
+        for instance_name, manager in self.instance_managers.items():
+            status["instances"][instance_name] = manager.get_status_report()
+        
+        return status
+    
+    def start_modules_for_instance(self, instance_name: str) -> bool:
+        """Manually start modules for an instance"""
+        if instance_name not in self.instance_managers:
+            return False
+        
+        manager = self.instance_managers[instance_name]
+        return manager.start_all_enabled()
+    
+    def stop_modules_for_instance(self, instance_name: str) -> bool:
+        """Stop modules for an instance"""
+        if instance_name not in self.instance_managers:
+            return False
+        
+        manager = self.instance_managers[instance_name]
+        return manager.stop_all()
+    
+    def start_specific_module(self, instance_name: str, module_name: str) -> bool:
+        """Start a specific module for an instance"""
+        if instance_name not in self.instance_managers:
+            return False
+        
+        manager = self.instance_managers[instance_name]
+        return manager.start_module(module_name)
+    
+    def stop_specific_module(self, instance_name: str, module_name: str) -> bool:
+        """Stop a specific module for an instance"""
+        if instance_name not in self.instance_managers:
+            return False
+        
+        manager = self.instance_managers[instance_name]
+        return manager.stop_module(module_name)
     
     def refresh_modules(self):
         """Refresh modules when instances change"""
@@ -229,84 +334,110 @@ class ModuleManager:
             current_instances = self.app.instance_manager.get_instances()
             current_names = [inst["name"] for inst in current_instances]
             
-            # Remove modules for deleted instances
-            modules_to_remove = [name for name in self.autostart_modules.keys() if name not in current_names]
+            # Remove managers for deleted instances
+            managers_to_remove = [name for name in self.instance_managers.keys() if name not in current_names]
             
-            for instance_name in modules_to_remove:
-                if instance_name in self.autostart_modules:
-                    del self.autostart_modules[instance_name]
+            for instance_name in managers_to_remove:
+                if instance_name in self.instance_managers:
+                    self.instance_managers[instance_name].stop_all()
+                    del self.instance_managers[instance_name]
                 if instance_name in self.settings_cache:
                     del self.settings_cache[instance_name]
-                self.app.add_console_message(f"🗑 Removed module for deleted instance: {instance_name}")
+                self.app.add_console_message(f"🗑 Removed multi-module system for deleted instance: {instance_name}")
             
-            # Add modules for new instances
+            # Add managers for new instances
             for instance in current_instances:
                 instance_name = instance["name"]
-                if instance_name not in self.autostart_modules:
+                if instance_name not in self.instance_managers:
+                    # Initialize for new instance (simplified version)
                     try:
+                        from modules.base_module import ConcurrentModuleManager
                         from modules.autostart_game import AutoStartGameModule
                         
-                        autostart_module = AutoStartGameModule(
-                            self.app.instance_manager,
+                        manager = ConcurrentModuleManager(
+                            instance_name=instance_name,
+                            instance_manager=self.app.instance_manager,
                             console_callback=self.app.add_console_message
                         )
                         
-                        self.autostart_modules[instance_name] = autostart_module
+                        # Load settings and register basic modules
                         settings = self._load_instance_settings(instance_name)
                         self.settings_cache[instance_name] = settings
                         
-                        self.app.add_console_message(f"➕ Added module for new instance: {instance_name}")
+                        # Register at least AutoStartGame
+                        autostart_config = settings.get("autostart_game", {})
+                        manager.register_module(AutoStartGameModule, **autostart_config)
                         
-                    except ImportError as e:
-                        self.app.add_console_message(f"❌ Failed to create module for {instance_name}: {e}")
+                        self.instance_managers[instance_name] = manager
+                        
+                        self.app.add_console_message(f"➕ Added multi-module system for new instance: {instance_name}")
+                        
+                    except Exception as e:
+                        self.app.add_console_message(f"❌ Failed to create module system for {instance_name}: {e}")
             
-            self.app.add_console_message(f"🔄 Refreshed modules for {len(current_instances)} instances")
+            self.app.add_console_message(f"🔄 Refreshed multi-module systems for {len(current_instances)} instances")
             
         except Exception as e:
-            self.app.add_console_message(f"❌ Module refresh error: {e}")
+            self.app.add_console_message(f"❌ Multi-module refresh error: {e}")
     
     def reload_instance_settings(self, instance_name: str):
         """Reload settings for a specific instance"""
         try:
             settings = self._load_instance_settings(instance_name)
             self.settings_cache[instance_name] = settings
-            self.app.add_console_message(f"🔄 Reloaded settings for {instance_name}")
+            self.app.add_console_message(f"🔄 Reloaded multi-module settings for {instance_name}")
         except Exception as e:
             self.app.add_console_message(f"❌ Failed to reload settings for {instance_name}: {e}")
     
+    def stop_status_monitoring(self):
+        """Stop status monitoring (for cleanup)"""
+        self.status_monitor_running = False
+        if self.status_monitor_thread:
+            self.status_monitor_thread.join(timeout=5)
+    
+    def stop_all_modules(self):
+        """Stop all modules for all instances"""
+        for instance_name, manager in self.instance_managers.items():
+            try:
+                manager.stop_all()
+            except Exception as e:
+                print(f"Error stopping modules for {instance_name}: {e}")
+        
+        self.stop_status_monitoring()
+    
+    # Legacy compatibility methods
+    def check_auto_startup(self):
+        """Legacy method - redirect to new multi-module system"""
+        self.check_auto_startup_initial()
+    
+    def get_autostart_module(self, instance_name: str):
+        """Legacy method - get AutoStartGame module"""
+        if instance_name in self.instance_managers:
+            manager = self.instance_managers[instance_name]
+            return manager.modules.get("AutoStartGameModule")
+        return None
+    
     def get_module_status(self) -> Dict:
-        """Get status of all modules"""
-        status = {
-            "total_instances": len(self.autostart_modules),
-            "auto_startup_enabled": 0,
-            "currently_running": 0,
-            "available_modules": 0,
-            "running_instances": 0,
-            "stopped_instances": 0
-        }
+        """Legacy method - get overall module status"""
+        total_instances = len(self.instance_managers)
+        total_modules = 0
+        running_modules = 0
+        auto_startup_enabled = 0
         
-        try:
-            instances = self.app.instance_manager.get_instances()
-            for instance in instances:
-                if instance["status"] == "Running":
-                    status["running_instances"] += 1
-                else:
-                    status["stopped_instances"] += 1
+        for instance_name, manager in self.instance_managers.items():
+            status_report = manager.get_status_report()
+            total_modules += status_report.get("total_modules", 0)
+            running_modules += status_report.get("running_modules", 0)
             
-            for instance_name, module in self.autostart_modules.items():
-                settings = self.settings_cache.get(instance_name, {})
-                
-                if settings.get("autostart_game", {}).get("auto_startup", False):
-                    status["auto_startup_enabled"] += 1
-                
-                if module.is_available():
-                    status["available_modules"] += 1
-                
-                running_instances = module.get_running_instances()
-                if instance_name in running_instances:
-                    status["currently_running"] += 1
+            settings = self.settings_cache.get(instance_name, {})
+            if settings.get("autostart_game", {}).get("auto_startup", False):
+                auto_startup_enabled += 1
         
-        except Exception as e:
-            self.app.add_console_message(f"❌ Error getting module status: {e}")
-        
-        return status
+        return {
+            "total_instances": total_instances,
+            "total_modules": total_modules,
+            "running_modules": running_modules,
+            "auto_startup_enabled": auto_startup_enabled,
+            "initialization_complete": self.initialization_complete,
+            "status_monitoring": self.status_monitor_running
+        }

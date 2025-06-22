@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-BENSON v2.0 - FINAL FIXED Main Application
-Working loading animation and smooth instance operations
+BENSON v2.0 - FIXED Main Application with Auto-startup Integration
+Working loading animation and proper auto-startup triggering
 """
 
 import tkinter as tk
@@ -499,10 +499,24 @@ class BensonApp(tk.Tk):
             
             print("[BensonApp] ✅ Main window is now visible and ready!")
             
+            # NEW: Trigger initial auto-startup check after app is fully loaded
+            self.after(2000, self._trigger_initial_auto_startup)
+            
         except Exception as e:
             print(f"[CloseLoading] Error: {e}")
             # Fallback - show window anyway
             self.deiconify()
+
+    def _trigger_initial_auto_startup(self):
+        """NEW: Trigger initial auto-startup check after app is fully loaded"""
+        try:
+            if hasattr(self, 'module_manager') and self.module_manager:
+                self.add_console_message("🔍 Performing initial auto-startup check...")
+                self.module_manager.check_auto_startup_initial()
+            else:
+                print("[BensonApp] Module manager not available for auto-startup")
+        except Exception as e:
+            print(f"[AutoStartup] Error triggering initial auto-startup: {e}")
 
     def force_refresh_instances(self):
         """Force refresh instances - called by instance manager (DISABLED)"""
@@ -619,9 +633,9 @@ class BensonApp(tk.Tk):
         except Exception as e:
             print(f"[LoadInstances] Error: {e}")
 
-    # Instance Operations
+    # FIXED: Instance Operations with Auto-startup Integration
     def start_instance(self, name):
-        """Start instance with optimization"""
+        """Start instance with optimization and auto-startup integration"""
         def start_with_optimization():
             try:
                 self.add_console_message(f"🔧 Auto-optimizing {name} before start...")
@@ -631,7 +645,21 @@ class BensonApp(tk.Tk):
                 else:
                     self.add_console_message(f"⚠ {name} optimization failed, starting anyway...")
 
-                self.instance_ops.start_instance(name)
+                # Start the instance
+                start_success = self.instance_manager.start_instance(name)
+                
+                if start_success:
+                    self.add_console_message(f"✅ Started: {name}")
+                    
+                    # NEW: Trigger auto-startup check for this specific instance
+                    if hasattr(self, 'module_manager') and self.module_manager:
+                        self.add_console_message(f"🔍 Checking auto-startup for {name}...")
+                        # Use the main thread to trigger auto-startup
+                        self.after(0, lambda: self.module_manager.trigger_auto_startup_for_instance(name))
+                    
+                else:
+                    self.add_console_message(f"❌ Failed to start: {name}")
+                    
             except Exception as e:
                 self.add_console_message(f"❌ Error in start_instance: {e}")
 
@@ -800,6 +828,8 @@ class BensonApp(tk.Tk):
         try:
             if hasattr(self, 'loading'):
                 self.loading.close()
+            if hasattr(self, 'module_manager'):
+                self.module_manager.stop_status_monitoring()
         except:
             pass
         super().destroy()
