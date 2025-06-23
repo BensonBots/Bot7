@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - Smart Module Manager 
-Prevents duplicate AutoStart runs and smarter monitoring
+BENSON v2.0 - COMPLETE FIXED Module Manager with Auto-Module Starting
+Now properly starts all enabled modules after AutoStart completes
 """
 
 import os
@@ -11,7 +11,7 @@ from typing import Dict, List
 
 
 class ModuleManager:
-    """Smart module manager that prevents duplicate AutoStart runs"""
+    """COMPLETE FIXED: Module manager that starts all enabled modules after AutoStart"""
     
     def __init__(self, app_ref):
         self.app = app_ref
@@ -26,6 +26,9 @@ class ModuleManager:
         
         # Track AutoStart completion to prevent duplicates
         self.autostart_completed = {}  # instance_name -> completion_time
+        
+        # NEW: Track which modules are running for each instance
+        self.running_modules = {}  # instance_name -> {module_name: True/False}
     
     def initialize_modules(self):
         """Initialize all modules for all instances"""
@@ -51,6 +54,7 @@ class ModuleManager:
                 
                 # Initialize module container for this instance
                 self.instance_modules[instance_name] = {}
+                self.running_modules[instance_name] = {}
                 
                 # Create AutoStartGame module (always enabled)
                 autostart_config = settings.get("autostart_game", {})
@@ -60,6 +64,7 @@ class ModuleManager:
                     console_callback=self.app.add_console_message
                 )
                 self.instance_modules[instance_name]["AutoStartGameModule"] = autostart_module
+                self.running_modules[instance_name]["AutoStartGameModule"] = False
                 
                 # Create AutoGather module if available and enabled
                 if AutoGatherModule and settings.get("auto_gather", {}).get("enabled", True):
@@ -69,6 +74,8 @@ class ModuleManager:
                         console_callback=self.app.add_console_message
                     )
                     self.instance_modules[instance_name]["AutoGatherModule"] = gather_module
+                    self.running_modules[instance_name]["AutoGatherModule"] = False
+                    self.app.add_console_message(f"✅ AutoGather module initialized for {instance_name}")
                 
                 self.app.add_console_message(f"🔧 Initialized module system for {instance_name}")
             
@@ -148,7 +155,96 @@ class ModuleManager:
     def _mark_autostart_completed(self, instance_name: str):
         """Mark AutoStart as completed for this instance"""
         self.autostart_completed[instance_name] = time.time()
+        self.running_modules[instance_name]["AutoStartGameModule"] = True
         self.app.add_console_message(f"✅ Marked AutoStart complete for {instance_name}")
+        
+        # NEW: Start other enabled modules after AutoStart completes
+        self._start_other_modules_after_autostart(instance_name)
+    
+    def _start_other_modules_after_autostart(self, instance_name: str):
+        """NEW: Start other enabled modules after AutoStart completes successfully"""
+        try:
+            if instance_name not in self.instance_modules:
+                return
+            
+            settings = self.settings_cache.get(instance_name, {})
+            modules_to_start = []
+            
+            # Check AutoGather
+            if ("AutoGatherModule" in self.instance_modules[instance_name] and 
+                settings.get("auto_gather", {}).get("enabled", True) and
+                not self.running_modules[instance_name].get("AutoGatherModule", False)):
+                modules_to_start.append("AutoGatherModule")
+            
+            # Add other modules here as they're implemented
+            # if ("AutoTrainModule" in self.instance_modules[instance_name] and 
+            #     settings.get("auto_train", {}).get("enabled", True)):
+            #     modules_to_start.append("AutoTrainModule")
+            
+            if modules_to_start:
+                self.app.add_console_message(f"🎮 Starting additional modules for {instance_name}: {', '.join(modules_to_start)}")
+                
+                for module_name in modules_to_start:
+                    # Add a small delay between module starts
+                    delay = modules_to_start.index(module_name) * 1000
+                    self.app.after(delay, lambda name=instance_name, mod=module_name: self._start_module_for_instance(name, mod))
+            else:
+                self.app.add_console_message(f"ℹ️ No additional modules to start for {instance_name}")
+                
+        except Exception as e:
+            self.app.add_console_message(f"❌ Error starting additional modules for {instance_name}: {e}")
+    
+    def _start_module_for_instance(self, instance_name: str, module_name: str):
+        """Start a specific module for an instance"""
+        try:
+            if (instance_name not in self.instance_modules or 
+                module_name not in self.instance_modules[instance_name]):
+                self.app.add_console_message(f"❌ Module {module_name} not found for {instance_name}")
+                return False
+            
+            module = self.instance_modules[instance_name][module_name]
+            
+            # Different modules have different start methods
+            if module_name == "AutoGatherModule":
+                # AutoGather modules use the base module start method
+                if hasattr(module, 'start'):
+                    self.app.add_console_message(f"🚀 Starting {module_name} for {instance_name}...")
+                    success = module.start()
+                    if success:
+                        self.running_modules[instance_name][module_name] = True
+                        self.app.add_console_message(f"✅ Started {module_name} for {instance_name}")
+                        return True
+                    else:
+                        self.app.add_console_message(f"❌ Failed to start {module_name} for {instance_name}")
+                        return False
+                else:
+                    self.app.add_console_message(f"⚠️ {module_name} doesn't have start method")
+                    return False
+            
+            # Add other module types as needed
+            elif module_name == "AutoTrainModule":
+                if hasattr(module, 'start'):
+                    success = module.start()
+                    if success:
+                        self.running_modules[instance_name][module_name] = True
+                        self.app.add_console_message(f"✅ Started {module_name} for {instance_name}")
+                        return True
+                    else:
+                        self.app.add_console_message(f"❌ Failed to start {module_name} for {instance_name}")
+                        return False
+                else:
+                    self.app.add_console_message(f"⚠️ {module_name} doesn't have start method")
+                    return False
+            
+            else:
+                self.app.add_console_message(f"⚠️ Unknown module type: {module_name}")
+                return False
+                
+        except Exception as e:
+            self.app.add_console_message(f"❌ Error starting {module_name} for {instance_name}: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
     
     def _stop_modules_for_instance(self, instance_name: str):
         """Stop all running modules for a specific instance"""
@@ -166,21 +262,18 @@ class ModuleManager:
                         if module.get_running_instances():  # Only if actually running
                             module.stop_auto_game()
                             stopped_modules.append(f"{module_name}(AutoStart)")
+                            self.running_modules[instance_name][module_name] = False
                     
-                    # Stop AutoGather modules  
-                    if hasattr(module, 'stop_auto_gather'):
-                        if module.get_running_instances():  # Only if actually running
-                            module.stop_auto_gather()
-                            stopped_modules.append(f"{module_name}(AutoGather)")
+                    # Stop AutoGather and other modules using base module system
+                    if hasattr(module, 'stop'):
+                        if self.running_modules[instance_name].get(module_name, False):
+                            module.stop()
+                            stopped_modules.append(module_name)
+                            self.running_modules[instance_name][module_name] = False
                     
                     # Call cleanup for stopped instance
                     if hasattr(module, 'cleanup_for_stopped_instance'):
                         module.cleanup_for_stopped_instance()
-                    
-                    # Generic stop method
-                    elif hasattr(module, 'stop'):
-                        module.stop()
-                        stopped_modules.append(module_name)
                         
                 except Exception as e:
                     print(f"Error stopping {module_name} for {instance_name}: {e}")
@@ -278,7 +371,7 @@ class ModuleManager:
             def on_complete(success: bool):
                 if success:
                     self.app.add_console_message(f"🎉 AutoStart completed successfully for {instance_name}")
-                    # CRITICAL: Mark as completed to prevent future runs
+                    # CRITICAL: Mark as completed to prevent future runs AND start other modules
                     self._mark_autostart_completed(instance_name)
                 else:
                     self.app.add_console_message(f"❌ AutoStart failed for {instance_name}")
@@ -362,6 +455,10 @@ class ModuleManager:
                                     if autostart_module and hasattr(autostart_module, 'reset_completion_status'):
                                         autostart_module.reset_completion_status()
                                 
+                                # Reset running status for all modules
+                                for module_name in self.running_modules.get(instance_name, {}):
+                                    self.running_modules[instance_name][module_name] = False
+                                
                                 # CRITICAL: Stop any running modules for stopped instances
                                 self._stop_modules_for_instance(instance_name)
                     
@@ -371,6 +468,100 @@ class ModuleManager:
         self.status_monitor_thread = threading.Thread(target=smart_monitor_loop, daemon=True, name="SmartModuleMonitor")
         self.status_monitor_thread.start()
         self.app.add_console_message("🔍 Started smart module status monitoring")
+    
+    def get_module_status_for_instance(self, instance_name: str) -> Dict:
+        """Get status of all modules for an instance"""
+        if instance_name not in self.instance_modules:
+            return {"error": "Instance not found"}
+        
+        status = {
+            "instance_name": instance_name,
+            "autostart_completed": self._is_autostart_recently_completed(instance_name),
+            "modules": {}
+        }
+        
+        for module_name in self.instance_modules[instance_name]:
+            is_running = self.running_modules.get(instance_name, {}).get(module_name, False)
+            status["modules"][module_name] = {
+                "enabled": True,  # Could check settings here
+                "running": is_running,
+                "status": "running" if is_running else "stopped"
+            }
+        
+        return status
+    
+    def manually_start_gather_for_instance(self, instance_name: str) -> bool:
+        """Manually start AutoGather for an instance"""
+        try:
+            self.app.add_console_message(f"🎯 Manually starting AutoGather for {instance_name}")
+            return self._start_module_for_instance(instance_name, "AutoGatherModule")
+        except Exception as e:
+            self.app.add_console_message(f"❌ Error manually starting AutoGather: {e}")
+            return False
+    
+    def manually_stop_gather_for_instance(self, instance_name: str) -> bool:
+        """Manually stop AutoGather for an instance"""
+        try:
+            if (instance_name not in self.instance_modules or 
+                "AutoGatherModule" not in self.instance_modules[instance_name]):
+                self.app.add_console_message(f"❌ AutoGather module not found for {instance_name}")
+                return False
+            
+            module = self.instance_modules[instance_name]["AutoGatherModule"]
+            if hasattr(module, 'stop'):
+                self.app.add_console_message(f"🛑 Stopping AutoGather for {instance_name}")
+                success = module.stop()
+                if success:
+                    self.running_modules[instance_name]["AutoGatherModule"] = False
+                    self.app.add_console_message(f"✅ Stopped AutoGather for {instance_name}")
+                else:
+                    self.app.add_console_message(f"❌ Failed to stop AutoGather for {instance_name}")
+                return success
+            else:
+                self.app.add_console_message(f"⚠️ AutoGather module doesn't have stop method")
+                return False
+        except Exception as e:
+            self.app.add_console_message(f"❌ Error manually stopping AutoGather: {e}")
+            return False
+    
+    def manually_start_all_modules_for_instance(self, instance_name: str) -> bool:
+        """Manually start all enabled modules for an instance"""
+        try:
+            self.app.add_console_message(f"🚀 Manually starting all modules for {instance_name}")
+            
+            if instance_name not in self.instance_modules:
+                self.app.add_console_message(f"❌ No modules found for {instance_name}")
+                return False
+            
+            settings = self.settings_cache.get(instance_name, {})
+            modules_started = []
+            
+            # Start AutoGather if enabled and not running
+            if ("AutoGatherModule" in self.instance_modules[instance_name] and 
+                settings.get("auto_gather", {}).get("enabled", True) and
+                not self.running_modules[instance_name].get("AutoGatherModule", False)):
+                
+                if self._start_module_for_instance(instance_name, "AutoGatherModule"):
+                    modules_started.append("AutoGatherModule")
+            
+            # Add other modules as they become available
+            # if ("AutoTrainModule" in self.instance_modules[instance_name] and 
+            #     settings.get("auto_train", {}).get("enabled", True) and
+            #     not self.running_modules[instance_name].get("AutoTrainModule", False)):
+            #     
+            #     if self._start_module_for_instance(instance_name, "AutoTrainModule"):
+            #         modules_started.append("AutoTrainModule")
+            
+            if modules_started:
+                self.app.add_console_message(f"✅ Started modules for {instance_name}: {', '.join(modules_started)}")
+                return True
+            else:
+                self.app.add_console_message(f"ℹ️ No modules to start for {instance_name} (already running or disabled)")
+                return True
+                
+        except Exception as e:
+            self.app.add_console_message(f"❌ Error manually starting modules for {instance_name}: {e}")
+            return False
     
     def _load_instance_settings(self, instance_name: str) -> Dict:
         """Load settings for a specific instance"""
@@ -434,12 +625,16 @@ class ModuleManager:
         }
         
         for module_name, module in modules.items():
+            running_status = self.running_modules.get(instance_name, {}).get(module_name, False)
+            
             if hasattr(module, 'get_module_info'):
                 status["modules"][module_name] = module.get_module_info()
             elif hasattr(module, 'get_status'):
                 status["modules"][module_name] = module.get_status()
             else:
                 status["modules"][module_name] = {"status": "unknown"}
+            
+            status["modules"][module_name]["running"] = running_status
         
         return status
     
@@ -501,6 +696,8 @@ class ModuleManager:
                         try:
                             if hasattr(module, 'stop_auto_game'):
                                 module.stop_auto_game()
+                            if hasattr(module, 'stop'):
+                                module.stop()
                         except:
                             pass
                     
@@ -508,6 +705,9 @@ class ModuleManager:
                 
                 if instance_name in self.settings_cache:
                     del self.settings_cache[instance_name]
+                
+                if instance_name in self.running_modules:
+                    del self.running_modules[instance_name]
                 
                 # Clear completion status
                 if instance_name in self.autostart_completed:
@@ -522,12 +722,20 @@ class ModuleManager:
                     try:
                         from modules.autostart_game import AutoStartGameModule
                         
+                        # Try to import AutoGather
+                        AutoGatherModule = None
+                        try:
+                            from modules.auto_gather import AutoGatherModule
+                        except ImportError:
+                            pass
+                        
                         # Load settings and create modules
                         settings = self._load_instance_settings(instance_name)
                         self.settings_cache[instance_name] = settings
                         
                         # Initialize module container
                         self.instance_modules[instance_name] = {}
+                        self.running_modules[instance_name] = {}
                         
                         # Create AutoStart module
                         autostart_module = AutoStartGameModule(
@@ -536,6 +744,17 @@ class ModuleManager:
                             console_callback=self.app.add_console_message
                         )
                         self.instance_modules[instance_name]["AutoStartGameModule"] = autostart_module
+                        self.running_modules[instance_name]["AutoStartGameModule"] = False
+                        
+                        # Create AutoGather module if available
+                        if AutoGatherModule and settings.get("auto_gather", {}).get("enabled", True):
+                            gather_module = AutoGatherModule(
+                                instance_name=instance_name,
+                                shared_resources=self.app.instance_manager,
+                                console_callback=self.app.add_console_message
+                            )
+                            self.instance_modules[instance_name]["AutoGatherModule"] = gather_module
+                            self.running_modules[instance_name]["AutoGatherModule"] = False
                         
                         self.app.add_console_message(f"➕ Added module system for new instance: {instance_name}")
                         
@@ -569,10 +788,102 @@ class ModuleManager:
                 try:
                     if hasattr(module, 'stop_auto_game'):
                         module.stop_auto_game()
+                    if hasattr(module, 'stop'):
+                        module.stop()
+                    # Mark as stopped
+                    if instance_name in self.running_modules:
+                        self.running_modules[instance_name][module_name] = False
                 except Exception as e:
                     print(f"Error stopping {module_name} for {instance_name}: {e}")
         
         self.stop_status_monitoring()
+    
+    def get_running_modules_for_instance(self, instance_name: str) -> List[str]:
+        """Get list of running modules for an instance"""
+        if instance_name not in self.running_modules:
+            return []
+        
+        running = []
+        for module_name, is_running in self.running_modules[instance_name].items():
+            if is_running:
+                running.append(module_name)
+        
+        return running
+    
+    def is_module_running(self, instance_name: str, module_name: str) -> bool:
+        """Check if a specific module is running for an instance"""
+        return self.running_modules.get(instance_name, {}).get(module_name, False)
+    
+    def force_restart_module(self, instance_name: str, module_name: str) -> bool:
+        """Force restart a specific module"""
+        try:
+            self.app.add_console_message(f"🔄 Force restarting {module_name} for {instance_name}")
+            
+            # Stop first if running
+            if self.is_module_running(instance_name, module_name):
+                if module_name == "AutoGatherModule":
+                    self.manually_stop_gather_for_instance(instance_name)
+                # Add other module types as needed
+                
+                # Wait a moment
+                time.sleep(2)
+            
+            # Start the module
+            if module_name == "AutoGatherModule":
+                return self.manually_start_gather_for_instance(instance_name)
+            # Add other module types as needed
+            else:
+                return self._start_module_for_instance(instance_name, module_name)
+                
+        except Exception as e:
+            self.app.add_console_message(f"❌ Error force restarting {module_name}: {e}")
+            return False
+    
+    def debug_module_status(self, instance_name: str = None):
+        """Debug method to print detailed module status"""
+        print("\n" + "="*60)
+        print("MODULE MANAGER DEBUG STATUS")
+        print("="*60)
+        
+        print(f"Initialization complete: {self.initialization_complete}")
+        print(f"Status monitoring running: {self.status_monitor_running}")
+        print(f"Total instances: {len(self.instance_modules)}")
+        print(f"AutoStart completions: {len(self.autostart_completed)}")
+        
+        if instance_name:
+            instances_to_check = [instance_name] if instance_name in self.instance_modules else []
+        else:
+            instances_to_check = list(self.instance_modules.keys())
+        
+        for inst_name in instances_to_check:
+            print(f"\n--- Instance: {inst_name} ---")
+            
+            # AutoStart status
+            autostart_completed = self._is_autostart_recently_completed(inst_name)
+            print(f"AutoStart completed: {autostart_completed}")
+            
+            # Module status
+            modules = self.instance_modules.get(inst_name, {})
+            running_status = self.running_modules.get(inst_name, {})
+            
+            for mod_name, module in modules.items():
+                is_running = running_status.get(mod_name, False)
+                status_symbol = "🟢" if is_running else "🔴"
+                print(f"  {status_symbol} {mod_name}: {'RUNNING' if is_running else 'STOPPED'}")
+                
+                # Additional module info if available
+                if hasattr(module, 'get_status_info'):
+                    try:
+                        info = module.get_status_info()
+                        print(f"    Status: {info.get('status', 'unknown')}")
+                        print(f"    Executions: {info.get('execution_count', 0)}")
+                        print(f"    Errors: {info.get('error_count', 0)}")
+                        if info.get('last_error'):
+                            print(f"    Last error: {info['last_error']}")
+                    except Exception as e:
+                        print(f"    Error getting status: {e}")
+        
+        print("="*60)
     
     # Legacy compatibility methods
     def check_auto_startup(self):
@@ -590,11 +901,10 @@ class ModuleManager:
         for instance_name, modules in self.instance_modules.items():
             total_modules += len(modules)
             
-            # Count running modules (simplified)
-            for module in modules.values():
-                if hasattr(module, 'get_running_instances'):
-                    if module.get_running_instances():
-                        running_modules += 1
+            # Count running modules
+            for module_name in modules.keys():
+                if self.running_modules.get(instance_name, {}).get(module_name, False):
+                    running_modules += 1
             
             settings = self.settings_cache.get(instance_name, {})
             if settings.get("autostart_game", {}).get("auto_startup", False):
@@ -609,3 +919,71 @@ class ModuleManager:
             "initialization_complete": self.initialization_complete,
             "status_monitoring": self.status_monitor_running
         }
+    
+    # NEW: Method to force completion status (for testing)
+    def force_mark_autostart_completed(self, instance_name: str):
+        """Force mark AutoStart as completed (for testing/debugging)"""
+        self.app.add_console_message(f"🔧 Force marking AutoStart complete for {instance_name}")
+        self._mark_autostart_completed(instance_name)
+    
+    # NEW: Method to clear completion status (for testing)
+    def clear_autostart_completion(self, instance_name: str):
+        """Clear AutoStart completion status (for testing/debugging)"""
+        if instance_name in self.autostart_completed:
+            del self.autostart_completed[instance_name]
+            self.app.add_console_message(f"🔧 Cleared AutoStart completion for {instance_name}")
+        
+        if instance_name in self.running_modules:
+            self.running_modules[instance_name]["AutoStartGameModule"] = False
+            self.app.add_console_message(f"🔧 Reset AutoStart running status for {instance_name}")
+    
+    # NEW: Comprehensive module control
+    def get_module_control_info(self) -> Dict:
+        """Get comprehensive module control information for UI"""
+        control_info = {
+            "manager_status": {
+                "initialized": self.initialization_complete,
+                "monitoring": self.status_monitor_running,
+                "total_instances": len(self.instance_modules)
+            },
+            "instances": {}
+        }
+        
+        for instance_name in self.instance_modules.keys():
+            instance_info = {
+                "autostart_completed": self._is_autostart_recently_completed(instance_name),
+                "modules": {},
+                "available_actions": []
+            }
+            
+            # Get instance status
+            instance = self.app.instance_manager.get_instance(instance_name)
+            instance_running = instance and instance["status"] == "Running"
+            instance_info["instance_running"] = instance_running
+            
+            # Get module info
+            for module_name in self.instance_modules[instance_name]:
+                is_running = self.running_modules.get(instance_name, {}).get(module_name, False)
+                instance_info["modules"][module_name] = {
+                    "running": is_running,
+                    "can_start": not is_running and instance_running,
+                    "can_stop": is_running,
+                    "can_restart": instance_running
+                }
+            
+            # Determine available actions
+            if instance_running:
+                if not instance_info["autostart_completed"]:
+                    instance_info["available_actions"].append("start_autostart")
+                
+                if not instance_info["modules"].get("AutoGatherModule", {}).get("running", False):
+                    instance_info["available_actions"].append("start_gather")
+                else:
+                    instance_info["available_actions"].append("stop_gather")
+                
+                instance_info["available_actions"].append("start_all_modules")
+                instance_info["available_actions"].append("restart_all_modules")
+            
+            control_info["instances"][instance_name] = instance_info
+        
+        return control_info

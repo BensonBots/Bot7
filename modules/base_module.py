@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - Base Module System
-Provides the foundation for all automation modules
+BENSON v2.0 - FIXED Base Module System
+Enhanced with better logging and error handling
 """
 
 import os
@@ -33,7 +33,7 @@ class ModulePriority(Enum):
 
 
 class BaseModule:
-    """Base class for all automation modules"""
+    """FIXED: Base class for all automation modules with better logging"""
     
     def __init__(self, instance_name: str, shared_resources, console_callback: Callable = None):
         self.instance_name = instance_name
@@ -66,6 +66,9 @@ class BaseModule:
         
         # Shared state
         self.shared_state = {}
+        
+        # FIXED: Better logging
+        self.log_message(f"✅ {self.module_name} module initialized")
     
     def get_module_priority(self) -> ModulePriority:
         """Get module priority - override in subclasses"""
@@ -84,15 +87,17 @@ class BaseModule:
         return []
     
     def start(self) -> bool:
-        """Start the module"""
+        """Start the module with enhanced logging"""
         try:
             if self.status in [ModuleStatus.RUNNING, ModuleStatus.STARTING]:
                 self.log_message("Module already running or starting")
                 return True
             
+            self.log_message(f"🚀 Starting {self.module_name} module...")
+            
             if not self.is_available():
                 missing = self.get_missing_dependencies()
-                self.log_message(f"Cannot start - missing dependencies: {missing}")
+                self.log_message(f"❌ Cannot start - missing dependencies: {missing}")
                 return False
             
             self.status = ModuleStatus.STARTING
@@ -108,21 +113,33 @@ class BaseModule:
             )
             self.worker_thread.start()
             
-            self.log_message(f"Started {self.module_name}")
-            return True
+            # Wait a moment to see if it starts successfully
+            time.sleep(0.5)
+            
+            if self.status == ModuleStatus.RUNNING:
+                self.log_message(f"✅ {self.module_name} started successfully")
+                return True
+            elif self.status == ModuleStatus.ERROR:
+                self.log_message(f"❌ {self.module_name} failed to start: {self.last_error}")
+                return False
+            else:
+                self.log_message(f"⏳ {self.module_name} starting...")
+                return True
             
         except Exception as e:
             self.status = ModuleStatus.ERROR
             self.last_error = str(e)
-            self.log_message(f"Failed to start: {e}", "error")
+            self.log_message(f"❌ Failed to start {self.module_name}: {e}")
             return False
     
     def stop(self) -> bool:
-        """Stop the module"""
+        """Stop the module with enhanced logging"""
         try:
             if self.status == ModuleStatus.STOPPED:
+                self.log_message(f"{self.module_name} already stopped")
                 return True
             
+            self.log_message(f"🛑 Stopping {self.module_name} module...")
             self.status = ModuleStatus.STOPPING
             self.stop_event.set()
             
@@ -131,41 +148,48 @@ class BaseModule:
                 self.worker_thread.join(timeout=10)
                 
                 if self.worker_thread.is_alive():
-                    self.log_message("Warning: Worker thread did not stop gracefully")
+                    self.log_message(f"⚠️ {self.module_name} worker thread did not stop gracefully")
             
             self.status = ModuleStatus.STOPPED
-            self.log_message(f"Stopped {self.module_name}")
+            self.log_message(f"✅ {self.module_name} stopped successfully")
             return True
             
         except Exception as e:
             self.status = ModuleStatus.ERROR
             self.last_error = str(e)
-            self.log_message(f"Error stopping: {e}", "error")
+            self.log_message(f"❌ Error stopping {self.module_name}: {e}")
             return False
     
     def pause(self):
         """Pause module execution"""
         if self.status == ModuleStatus.RUNNING:
             self.status = ModuleStatus.PAUSED
-            self.log_message(f"Paused {self.module_name}")
+            self.log_message(f"⏸️ Paused {self.module_name}")
     
     def resume(self):
         """Resume module execution"""
         if self.status == ModuleStatus.PAUSED:
             self.status = ModuleStatus.RUNNING
-            self.log_message(f"Resumed {self.module_name}")
+            self.log_message(f"▶️ Resumed {self.module_name}")
     
     def _worker_loop(self):
-        """Main worker loop"""
+        """FIXED: Main worker loop with better error handling"""
         try:
             self.status = ModuleStatus.RUNNING
+            self.log_message(f"🔄 {self.module_name} worker loop started")
             
             while not self.stop_event.is_set():
                 try:
                     if self.status == ModuleStatus.RUNNING:
                         # Execute module cycle
                         cycle_start = time.time()
-                        success = self.execute_cycle()
+                        
+                        try:
+                            success = self.execute_cycle()
+                        except Exception as cycle_error:
+                            self.log_message(f"❌ Cycle execution error: {cycle_error}")
+                            success = False
+                        
                         cycle_time = time.time() - cycle_start
                         
                         self.execution_count += 1
@@ -174,53 +198,75 @@ class BaseModule:
                         if success:
                             self.success_count += 1
                             self.retry_count = 0
+                            if self.execution_count % 10 == 1:  # Log every 10th success
+                                self.log_message(f"✅ {self.module_name} cycle {self.execution_count} completed (took {cycle_time:.1f}s)")
                         else:
                             self.error_count += 1
                             self.retry_count += 1
+                            self.log_message(f"❌ {self.module_name} cycle {self.execution_count} failed (retry {self.retry_count}/{self.max_retries})")
                             
                             if self.retry_count >= self.max_retries:
-                                self.log_message(f"Max retries exceeded, stopping module")
+                                self.log_message(f"🛑 {self.module_name} max retries exceeded, stopping module")
                                 break
                         
                         # Calculate next execution time
                         sleep_time = max(0, self.check_interval - cycle_time)
                         self.next_execution = datetime.now().timestamp() + sleep_time
+                        
+                        # FIXED: Better sleep handling
+                        self._safe_sleep(sleep_time)
                     
-                    # Sleep with interruption check
-                    for _ in range(int(self.check_interval * 10)):  # Check every 0.1 seconds
-                        if self.stop_event.is_set():
-                            break
-                        time.sleep(0.1)
+                    elif self.status == ModuleStatus.PAUSED:
+                        # Just sleep while paused
+                        self._safe_sleep(1)
+                    
+                    else:
+                        # Stopping or error state
+                        break
                         
                 except Exception as e:
                     self.error_count += 1
                     self.last_error = str(e)
-                    self.log_message(f"Cycle error: {e}", "error")
+                    self.log_message(f"❌ {self.module_name} worker loop error: {e}")
                     
                     # Sleep before retry
-                    time.sleep(min(self.check_interval, 30))
+                    self._safe_sleep(min(self.check_interval, 30))
+            
+            self.log_message(f"🏁 {self.module_name} worker loop ended")
             
         except Exception as e:
             self.status = ModuleStatus.ERROR
             self.last_error = str(e)
-            self.log_message(f"Worker loop error: {e}", "error")
+            self.log_message(f"❌ {self.module_name} worker loop fatal error: {e}")
         finally:
             if self.status != ModuleStatus.STOPPING:
                 self.status = ModuleStatus.STOPPED
     
+    def _safe_sleep(self, duration: float):
+        """Sleep with interruption check"""
+        sleep_steps = max(1, int(duration * 10))  # Check every 0.1 seconds
+        step_duration = duration / sleep_steps
+        
+        for _ in range(sleep_steps):
+            if self.stop_event.is_set():
+                break
+            time.sleep(step_duration)
+    
     def execute_cycle(self) -> bool:
         """Execute one cycle of module logic - override in subclasses"""
-        self.log_message("Base module cycle executed")
+        self.log_message(f"📋 {self.module_name} base cycle executed")
+        time.sleep(1)  # Simulate work
         return True
     
     def log_message(self, message: str, level: str = "info"):
-        """Log a message"""
+        """Enhanced log message with module context"""
         timestamp = datetime.now().strftime("[%H:%M:%S]")
         formatted_message = f"{timestamp} [{self.module_name}-{self.instance_name}] {message}"
         
         if self.console_callback:
             self.console_callback(formatted_message)
         
+        # Also print for debugging
         print(formatted_message)
     
     def get_status_info(self) -> Dict:
@@ -251,18 +297,21 @@ class BaseModule:
     
     # Utility methods for subclasses
     def get_screenshot(self) -> Optional[str]:
-        """Take screenshot of the instance"""
+        """Take screenshot of the instance with better error handling"""
         try:
             # Get instance index
             if not hasattr(self.shared_resources, 'get_instance'):
+                self.log_message("❌ No get_instance method in shared_resources")
                 return None
             
             instance = self.shared_resources.get_instance(self.instance_name)
             if not instance:
+                self.log_message(f"❌ Instance {self.instance_name} not found")
                 return None
             
             instance_index = instance.get("index")
             if instance_index is None:
+                self.log_message(f"❌ No index for instance {self.instance_name}")
                 return None
             
             # Take screenshot using MEmu ADB
@@ -280,6 +329,7 @@ class BaseModule:
             
             capture_result = subprocess.run(capture_cmd, capture_output=True, text=True, timeout=15)
             if capture_result.returncode != 0:
+                self.log_message(f"❌ Screenshot capture failed: {capture_result.stderr}")
                 return None
             
             time.sleep(0.5)
@@ -292,6 +342,7 @@ class BaseModule:
             
             pull_result = subprocess.run(pull_cmd, capture_output=True, text=True, timeout=15)
             if pull_result.returncode != 0:
+                self.log_message(f"❌ Screenshot pull failed: {pull_result.stderr}")
                 return None
             
             # Clean up device screenshot
@@ -307,23 +358,27 @@ class BaseModule:
             
             # Verify screenshot exists
             if os.path.exists(local_screenshot) and os.path.getsize(local_screenshot) > 10000:
+                self.log_message(f"📸 Screenshot taken: {os.path.basename(local_screenshot)}")
                 return local_screenshot
-            
-            return None
+            else:
+                self.log_message(f"❌ Invalid screenshot file")
+                return None
             
         except Exception as e:
-            self.log_message(f"Screenshot error: {e}", "error")
+            self.log_message(f"❌ Screenshot error: {e}")
             return None
     
     def click_position(self, x: int, y: int) -> bool:
-        """Click at specific coordinates"""
+        """Click at specific coordinates with better error handling"""
         try:
             instance = self.shared_resources.get_instance(self.instance_name)
             if not instance:
+                self.log_message(f"❌ Instance {self.instance_name} not found for click")
                 return False
             
             instance_index = instance.get("index")
             if instance_index is None:
+                self.log_message(f"❌ No index for instance {self.instance_name}")
                 return False
             
             memuc_path = self.shared_resources.MEMUC_PATH
@@ -335,10 +390,16 @@ class BaseModule:
             ]
             
             result = subprocess.run(tap_cmd, capture_output=True, text=True, timeout=10)
-            return result.returncode == 0
+            
+            if result.returncode == 0:
+                self.log_message(f"👆 Clicked position ({x}, {y})")
+                return True
+            else:
+                self.log_message(f"❌ Click failed at ({x}, {y}): {result.stderr}")
+                return False
             
         except Exception as e:
-            self.log_message(f"Click error at ({x}, {y}): {e}", "error")
+            self.log_message(f"❌ Click error at ({x}, {y}): {e}")
             return False
     
     def get_game_state(self, key: str) -> Any:
@@ -348,174 +409,23 @@ class BaseModule:
     def update_game_state(self, updates: Dict):
         """Update shared game state"""
         self.shared_state.update(updates)
+        self.log_message(f"📊 Updated game state: {list(updates.keys())}")
 
 
-class ConcurrentModuleManager:
-    """Manages multiple modules running concurrently for a single instance"""
-    
-    def __init__(self, instance_name: str, instance_manager, console_callback: Callable = None):
-        self.instance_name = instance_name
-        self.instance_manager = instance_manager
-        self.console_callback = console_callback or print
-        
-        # Module registry
-        self.modules = {}  # module_name -> module_instance
-        self.module_classes = {}  # module_name -> (class, config)
-        
-        # Shared resources and state
-        self.shared_state = {}
-        
-        # Manager state
-        self.running = False
-        self.lock = threading.Lock()
-    
-    def register_module(self, module_class, **config):
-        """Register a module class with configuration"""
-        module_name = module_class.__name__
-        self.module_classes[module_name] = (module_class, config)
-        self.log_message(f"Registered module: {module_name}")
-    
-    def start_all_enabled(self) -> bool:
-        """Start all enabled modules"""
-        with self.lock:
-            try:
-                success_count = 0
-                
-                # Sort modules by priority
-                sorted_modules = sorted(
-                    self.module_classes.items(),
-                    key=lambda x: self._get_module_priority(x[1][0])
-                )
-                
-                for module_name, (module_class, config) in sorted_modules:
-                    if config.get("enabled", True):
-                        if self._start_module_internal(module_name, module_class, config):
-                            success_count += 1
-                            time.sleep(1)  # Stagger starts
-                
-                self.running = success_count > 0
-                
-                if success_count > 0:
-                    self.log_message(f"Started {success_count}/{len(self.module_classes)} modules")
-                
-                return success_count > 0
-                
-            except Exception as e:
-                self.log_message(f"Error starting modules: {e}", "error")
-                return False
-    
-    def stop_all(self) -> bool:
-        """Stop all running modules"""
-        with self.lock:
-            try:
-                stop_count = 0
-                
-                for module_name, module in list(self.modules.items()):
-                    if module.stop():
-                        stop_count += 1
-                
-                self.modules.clear()
-                self.running = False
-                
-                if stop_count > 0:
-                    self.log_message(f"Stopped {stop_count} modules")
-                
-                return True
-                
-            except Exception as e:
-                self.log_message(f"Error stopping modules: {e}", "error")
-                return False
-    
-    def start_module(self, module_name: str) -> bool:
-        """Start a specific module"""
-        with self.lock:
-            if module_name in self.modules:
-                return True  # Already running
-            
-            if module_name not in self.module_classes:
-                self.log_message(f"Module {module_name} not registered")
-                return False
-            
-            module_class, config = self.module_classes[module_name]
-            return self._start_module_internal(module_name, module_class, config)
-    
-    def stop_module(self, module_name: str) -> bool:
-        """Stop a specific module"""
-        with self.lock:
-            if module_name not in self.modules:
-                return True  # Already stopped
-            
-            module = self.modules[module_name]
-            success = module.stop()
-            
-            if success:
-                del self.modules[module_name]
-            
-            return success
-    
-    def _start_module_internal(self, module_name: str, module_class, config) -> bool:
-        """Internal method to start a module"""
-        try:
-            # Create module instance
-            module = module_class(
-                instance_name=self.instance_name,
-                shared_resources=self.instance_manager,
-                console_callback=self.console_callback
-            )
-            
-            # Apply configuration
-            for key, value in config.items():
-                if hasattr(module, key):
-                    setattr(module, key, value)
-            
-            # Set shared state
-            module.shared_state = self.shared_state
-            
-            # Start module
-            if module.start():
-                self.modules[module_name] = module
-                return True
-            
-            return False
-            
-        except Exception as e:
-            self.log_message(f"Error starting {module_name}: {e}", "error")
-            return False
-    
-    def _get_module_priority(self, module_class) -> int:
-        """Get module priority for sorting"""
-        try:
-            # Create temporary instance to get priority
-            temp_module = module_class("temp", None, None)
-            return temp_module.get_module_priority().value
-        except:
-            return ModulePriority.MEDIUM.value
-    
-    def get_status_report(self) -> Dict:
-        """Get comprehensive status report"""
-        with self.lock:
-            running_modules = len([m for m in self.modules.values() if m.status == ModuleStatus.RUNNING])
-            
-            module_statuses = {}
-            for name, module in self.modules.items():
-                module_statuses[name] = module.get_status_info()
-            
-            return {
-                "instance_name": self.instance_name,
-                "manager_running": self.running,
-                "total_modules": len(self.module_classes),
-                "registered_modules": list(self.module_classes.keys()),
-                "running_modules": running_modules,
-                "active_modules": list(self.modules.keys()),
-                "module_statuses": module_statuses,
-                "shared_state_keys": list(self.shared_state.keys())
-            }
-    
-    def log_message(self, message: str, level: str = "info"):
-        """Log a message"""
-        formatted_message = f"[ModuleManager-{self.instance_name}] {message}"
-        
-        if self.console_callback:
-            self.console_callback(formatted_message)
-        
-        print(formatted_message)
+# Helper function for debugging modules
+def debug_module_status(module):
+    """Debug helper to print module status"""
+    if hasattr(module, 'get_status_info'):
+        status = module.get_status_info()
+        print(f"\n=== {status['module_name']} Debug Status ===")
+        print(f"Status: {status['status']}")
+        print(f"Enabled: {status['enabled']}")
+        print(f"Available: {status['available']}")
+        print(f"Execution count: {status['execution_count']}")
+        print(f"Success count: {status['success_count']}")
+        print(f"Error count: {status['error_count']}")
+        print(f"Last execution: {status['last_execution']}")
+        print(f"Last error: {status['last_error']}")
+        print("=" * 40)
+    else:
+        print(f"Module {module} doesn't have status info")
