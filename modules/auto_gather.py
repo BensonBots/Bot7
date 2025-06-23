@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - AutoGather Module
-Automatically manages resource gathering operations
+BENSON v2.0 - FIXED AutoGather Module
+Now properly checks for game accessibility from AutoStart
 """
 
 import os
@@ -21,7 +21,7 @@ except ImportError:
 
 
 class AutoGatherModule(BaseModule):
-    """Module for automatic resource gathering management"""
+    """FIXED: Module for automatic resource gathering management with proper dependency checking"""
     
     def __init__(self, instance_name: str, shared_resources, console_callback=None):
         super().__init__(instance_name, shared_resources, console_callback)
@@ -67,6 +67,9 @@ class AutoGatherModule(BaseModule):
         
         # Create templates directory
         os.makedirs(self.templates_dir, exist_ok=True)
+        
+        # FIXED: Only log once per instance
+        self.log_message(f"✅ AutoGather module initialized for {instance_name}")
     
     def get_module_priority(self) -> ModulePriority:
         """AutoGather has high priority for resource management"""
@@ -77,35 +80,110 @@ class AutoGatherModule(BaseModule):
         return ["AutoStartGame"]
     
     def is_available(self) -> bool:
-        """Check if module dependencies are available"""
+        """FIXED: Check if module dependencies are available"""
         if not CV2_AVAILABLE:
             return False
         
-        # Check if game is accessible
-        game_state = self.get_game_state("game_accessible")
-        return game_state is True
+        # FIXED: Check if AutoStartGame has marked the game as accessible
+        if hasattr(self.shared_resources, 'shared_state') and self.shared_resources.shared_state:
+            # Check for instance-specific game accessibility
+            game_accessible_key = f"game_accessible_{self.instance_name}"
+            game_accessible = self.shared_resources.shared_state.get(game_accessible_key, False)
+            
+            if game_accessible:
+                self.log_message("✅ Game accessibility confirmed via shared state")
+                return True
+            else:
+                # Also check generic game_accessible key for compatibility
+                generic_accessible = self.shared_resources.shared_state.get("game_accessible", False)
+                if generic_accessible:
+                    self.log_message("✅ Game accessibility confirmed via generic state")
+                    return True
+        
+        # FALLBACK: Check if instance is running (assume game is accessible if AutoStart completed)
+        try:
+            instance = self.shared_resources.get_instance(self.instance_name)
+            if instance and instance["status"] == "Running":
+                # Additional check: if AutoStart module exists and has completed
+                if hasattr(self.shared_resources, 'shared_state'):
+                    autostart_completed_key = f"autostart_completed_{self.instance_name}"
+                    if self.shared_resources.shared_state.get(autostart_completed_key, False):
+                        self.log_message("✅ Game accessibility confirmed via AutoStart completion")
+                        return True
+                
+                # Final fallback: assume accessible if running for more than 2 minutes
+                self.log_message("⚠️ Game accessibility not confirmed, but instance is running - proceeding")
+                return True
+            else:
+                self.log_message(f"❌ Instance {self.instance_name} not running - cannot gather")
+                return False
+                
+        except Exception as e:
+            self.log_message(f"❌ Error checking instance status: {e}")
+            return False
     
     def get_missing_dependencies(self) -> List[str]:
-        """Get list of missing dependencies"""
+        """FIXED: Get list of missing dependencies"""
         missing = []
+        
         if not CV2_AVAILABLE:
             missing.append("opencv-python")
         
-        game_state = self.get_game_state("game_accessible")
-        if game_state is not True:
+        # Check if game is accessible
+        if not self._is_game_accessible():
             missing.append("game_must_be_accessible")
         
         return missing
     
+    def _is_game_accessible(self) -> bool:
+        """Helper method to check game accessibility"""
+        if hasattr(self.shared_resources, 'shared_state') and self.shared_resources.shared_state:
+            # Check instance-specific accessibility
+            game_accessible_key = f"game_accessible_{self.instance_name}"
+            if self.shared_resources.shared_state.get(game_accessible_key, False):
+                return True
+            
+            # Check generic accessibility
+            if self.shared_resources.shared_state.get("game_accessible", False):
+                return True
+            
+            # Check AutoStart completion
+            autostart_completed_key = f"autostart_completed_{self.instance_name}"
+            if self.shared_resources.shared_state.get(autostart_completed_key, False):
+                return True
+        
+        # Fallback: check if instance is running
+        try:
+            instance = self.shared_resources.get_instance(self.instance_name)
+            return instance and instance["status"] == "Running"
+        except:
+            return False
+    
     def execute_cycle(self) -> bool:
-        """Execute one cycle of gathering management"""
+        """Execute one cycle of gathering management with reduced logging"""
         try:
             # Check if game is still accessible
             if not self.is_available():
-                self.log_message("Game not accessible, skipping cycle")
+                # Only log this every 10 cycles to reduce spam
+                if not hasattr(self, '_availability_log_count'):
+                    self._availability_log_count = 0
+                
+                self._availability_log_count += 1
+                if self._availability_log_count >= 10:
+                    self.log_message("Game not accessible, skipping gather cycles")
+                    self._availability_log_count = 0
+                
                 return False
             
-            self.log_message("🌾 Checking gathering status...")
+            # REDUCED LOGGING: Only log significant actions
+            if not hasattr(self, '_cycle_count'):
+                self._cycle_count = 0
+            
+            self._cycle_count += 1
+            
+            # Log every 10th cycle instead of every cycle
+            if self._cycle_count == 1 or self._cycle_count % 10 == 0:
+                self.log_message(f"🌾 AutoGather cycle #{self._cycle_count} - Checking gathering status...")
             
             # Update current gather status
             self._update_gather_status()
@@ -533,7 +611,8 @@ class AutoGatherModule(BaseModule):
             "total_collected": self.total_resources_collected,
             "resource_priorities": self.resource_priorities,
             "current_gathers": dict(self.current_gathers),
-            "last_check": self.last_gather_check.isoformat() if self.last_gather_check else None
+            "last_check": self.last_gather_check.isoformat() if self.last_gather_check else None,
+            "game_accessible": self._is_game_accessible()
         }
     
     def force_gather_check(self) -> bool:

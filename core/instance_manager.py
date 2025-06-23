@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - FIXED Instance Manager
-Fixed MEmu status detection to properly handle all status codes
+BENSON v2.0 - FIXED Instance Manager with Shared State Support
+Now properly manages shared state between modules
 """
 
 import subprocess
@@ -22,7 +22,121 @@ class InstanceManager:
         self.instances = []
         self.app = None  # Reference to main app for callbacks
         
+        # NEW: Shared state for modules
+        self.shared_state = {
+            "game_accessible": {},      # instance_name -> bool
+            "module_states": {},        # instance_name -> {module: state}
+            "last_updates": {},         # instance_name -> timestamp
+            "autostart_completed": {},  # instance_name -> bool
+            "game_world_active": {}     # instance_name -> bool
+        }
+        
         print(f"[InstanceManager] Initialized with MEmu at: {self.MEMUC_PATH}")
+        print(f"[InstanceManager] Shared state system ready")
+
+    def set_game_accessible(self, instance_name: str, accessible: bool):
+        """NEW: Set game accessibility state for an instance"""
+        try:
+            self.shared_state["game_accessible"][instance_name] = accessible
+            self.shared_state["last_updates"][instance_name] = time.time()
+            
+            if accessible:
+                print(f"[InstanceManager] ✅ Game marked as accessible for {instance_name}")
+            else:
+                print(f"[InstanceManager] ❌ Game marked as inaccessible for {instance_name}")
+                
+        except Exception as e:
+            print(f"[InstanceManager] Error setting game accessibility: {e}")
+    
+    def is_game_accessible(self, instance_name: str) -> bool:
+        """NEW: Check if game is accessible for an instance"""
+        return self.shared_state["game_accessible"].get(instance_name, False)
+    
+    def set_autostart_completed(self, instance_name: str, completed: bool):
+        """NEW: Set AutoStart completion state"""
+        try:
+            self.shared_state["autostart_completed"][instance_name] = completed
+            self.shared_state["last_updates"][instance_name] = time.time()
+            
+            if completed:
+                print(f"[InstanceManager] ✅ AutoStart marked as completed for {instance_name}")
+            else:
+                print(f"[InstanceManager] 🔄 AutoStart completion reset for {instance_name}")
+                
+        except Exception as e:
+            print(f"[InstanceManager] Error setting AutoStart completion: {e}")
+    
+    def is_autostart_completed(self, instance_name: str) -> bool:
+        """NEW: Check if AutoStart is completed for an instance"""
+        return self.shared_state["autostart_completed"].get(instance_name, False)
+    
+    def set_module_state(self, instance_name: str, module_name: str, state: dict):
+        """NEW: Set module state information"""
+        try:
+            if instance_name not in self.shared_state["module_states"]:
+                self.shared_state["module_states"][instance_name] = {}
+            
+            self.shared_state["module_states"][instance_name][module_name] = state
+            self.shared_state["last_updates"][instance_name] = time.time()
+            
+        except Exception as e:
+            print(f"[InstanceManager] Error setting module state: {e}")
+    
+    def get_module_state(self, instance_name: str, module_name: str) -> dict:
+        """NEW: Get module state information"""
+        try:
+            return self.shared_state["module_states"].get(instance_name, {}).get(module_name, {})
+        except Exception as e:
+            print(f"[InstanceManager] Error getting module state: {e}")
+            return {}
+    
+    def clear_instance_state(self, instance_name: str):
+        """NEW: Clear all shared state for an instance when it stops"""
+        try:
+            keys_to_clear = ["game_accessible", "module_states", "autostart_completed", "game_world_active"]
+            
+            for key in keys_to_clear:
+                if instance_name in self.shared_state[key]:
+                    del self.shared_state[key][instance_name]
+            
+            if instance_name in self.shared_state["last_updates"]:
+                del self.shared_state["last_updates"][instance_name]
+                
+            print(f"[InstanceManager] 🧹 Cleared shared state for {instance_name}")
+            
+        except Exception as e:
+            print(f"[InstanceManager] Error clearing instance state: {e}")
+    
+    def get_shared_state_summary(self) -> dict:
+        """NEW: Get summary of shared state for debugging"""
+        try:
+            summary = {
+                "total_instances_tracked": len(set().union(*[
+                    self.shared_state[key].keys() for key in self.shared_state.keys()
+                ])),
+                "game_accessible_count": len([v for v in self.shared_state["game_accessible"].values() if v]),
+                "autostart_completed_count": len([v for v in self.shared_state["autostart_completed"].values() if v]),
+                "instances_with_state": {}
+            }
+            
+            # Get per-instance summary
+            all_instances = set()
+            for state_dict in self.shared_state.values():
+                all_instances.update(state_dict.keys())
+            
+            for instance_name in all_instances:
+                summary["instances_with_state"][instance_name] = {
+                    "game_accessible": self.shared_state["game_accessible"].get(instance_name, False),
+                    "autostart_completed": self.shared_state["autostart_completed"].get(instance_name, False),
+                    "game_world_active": self.shared_state["game_world_active"].get(instance_name, False),
+                    "last_update": self.shared_state["last_updates"].get(instance_name, 0)
+                }
+            
+            return summary
+            
+        except Exception as e:
+            print(f"[InstanceManager] Error getting shared state summary: {e}")
+            return {"error": str(e)}
 
     def _sanitize_instance_name(self, name):
         """Sanitize instance name for MEmu compatibility"""
@@ -142,16 +256,6 @@ class InstanceManager:
         
         return "Stopped"
 
-    def _get_status_from_code(self, code):
-        """LEGACY: Convert MEmu status code to readable status"""
-        status_map = {
-            0: "Stopped",
-            1: "Running", 
-            2: "Starting",
-            3: "Stopping"
-        }
-        return status_map.get(code, f"Unknown({code})")
-
     def create_instance_with_name(self, name):
         """FAST: Create instance without hanging rename"""
         try:
@@ -221,7 +325,13 @@ class InstanceManager:
                     print(f"[InstanceManager] 🔄 Starting background rename to '{sanitized_name}'...")
                     self._background_rename(new_index, sanitized_name)
                 
-                # Step 8: Immediate UI refresh
+                # Step 8: Initialize shared state for new instance
+                self.shared_state["game_accessible"][actual_name] = False
+                self.shared_state["autostart_completed"][actual_name] = False
+                self.shared_state["game_world_active"][actual_name] = False
+                self.shared_state["last_updates"][actual_name] = time.time()
+                
+                # Step 9: Immediate UI refresh
                 if hasattr(self, 'app') and self.app:
                     print("[InstanceManager] 🔄 Triggering UI refresh...")
                     self.app.after(0, self.app.force_refresh_instances)
@@ -269,6 +379,9 @@ class InstanceManager:
                 print(f"[InstanceManager] Instance {name} not found")
                 return False
             
+            # Clear shared state for this instance
+            self.clear_instance_state(name)
+            
             result = subprocess.run(
                 [self.MEMUC_PATH, "remove", "-i", str(instance["index"])],
                 capture_output=True, text=True, timeout=60
@@ -313,6 +426,13 @@ class InstanceManager:
                 
             if result.returncode == 0:
                 print(f"[InstanceManager] Successfully started {name}")
+                
+                # Initialize shared state for started instance
+                self.shared_state["game_accessible"][name] = False
+                self.shared_state["autostart_completed"][name] = False
+                self.shared_state["game_world_active"][name] = False
+                self.shared_state["last_updates"][name] = time.time()
+                
                 return True
             else:
                 print(f"[InstanceManager] Failed to start {name}")
@@ -331,6 +451,9 @@ class InstanceManager:
             if not instance:
                 print(f"[InstanceManager] Instance {name} not found")
                 return False
+            
+            # Clear shared state when stopping
+            self.clear_instance_state(name)
             
             result = subprocess.run(
                 [self.MEMUC_PATH, "stop", "-i", str(instance["index"])],
@@ -415,37 +538,6 @@ class InstanceManager:
             print(f"[InstanceManager] Error optimizing {name}: {e}")
             return False
 
-    def rename_instance(self, current_name, new_name):
-        """Manual rename instance method"""
-        try:
-            print(f"[InstanceManager] Manual rename: {current_name} -> {new_name}")
-            
-            instance = self.get_instance_by_name(current_name)
-            if not instance:
-                print(f"[InstanceManager] Instance {current_name} not found")
-                return False
-            
-            result = subprocess.run(
-                [self.MEMUC_PATH, "rename", "-i", str(instance["index"]), new_name],
-                capture_output=True, text=True, timeout=15
-            )
-            
-            print(f"[InstanceManager] Rename result: {result.returncode}")
-            if result.stderr:
-                print(f"[InstanceManager] Rename stderr: {result.stderr}")
-            
-            if result.returncode == 0:
-                print(f"[InstanceManager] ✅ Successfully renamed {current_name} to {new_name}")
-                self.load_real_instances()
-                return True
-            else:
-                print(f"[InstanceManager] ❌ Failed to rename: {result.stderr}")
-                return False
-                
-        except Exception as e:
-            print(f"[InstanceManager] Error renaming: {e}")
-            return False
-
     # Helper methods
     def get_instance_by_name(self, name):
         """Get instance by name"""
@@ -480,32 +572,6 @@ class InstanceManager:
         except Exception as e:
             print(f"[InstanceManager] Error updating statuses: {e}")
 
-    def _get_real_instance_status(self, index, name):
-        """Get real-time status of an instance"""
-        try:
-            result = subprocess.run(
-                [self.MEMUC_PATH, "listvms"],
-                capture_output=True, text=True, timeout=10
-            )
-            
-            if result.returncode == 0:
-                lines = result.stdout.strip().split('\n')
-                for line in lines:
-                    if line.strip():
-                        parts = line.split(',')
-                        if len(parts) >= 3:
-                            line_index = int(parts[0])
-                            line_name = parts[1]
-                            
-                            if line_index == index or line_name == name:
-                                return self._parse_memu_status(parts)
-            
-            return "Unknown"
-            
-        except Exception as e:
-            print(f"[InstanceManager] Error getting real status: {e}")
-            return "Unknown"
-
     def _is_memu_available(self):
         """Check if MEmu is available and working"""
         try:
@@ -516,7 +582,3 @@ class InstanceManager:
             return result.returncode == 0
         except:
             return False
-
-    def optimize_instance_with_settings(self, name):
-        """Optimize instance with predefined settings"""
-        return self.optimize_instance_settings(name)

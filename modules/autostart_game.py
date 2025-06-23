@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - Smart AutoStartGame Module
-Fixed to prevent duplicate runs and unnecessary dialog clicking
+BENSON v2.0 - Complete AutoStartGame Module
+Combines both versions with enhanced shared state management and spam reduction
 """
 
 import os
@@ -21,7 +21,7 @@ except ImportError:
 
 
 class AutoStartGameModule:
-    """Smart AutoStartGame that only runs when needed and detects game state properly"""
+    """Complete AutoStartGame that properly communicates with other modules and prevents spam"""
     
     def __init__(self, instance_name: str, shared_resources, console_callback: Callable = None):
         self.instance_name = instance_name
@@ -36,6 +36,11 @@ class AutoStartGameModule:
         # CRITICAL: Track if we've already successfully started the game
         self.game_start_completed = False
         self.last_successful_start = None
+        
+        # NEW: Track cleanup logging to prevent spam
+        self._cleanup_logged = False
+        self._last_cleanup_time = 0
+        self._last_status_log = 0
         
         # Enhanced game state detection templates
         self.MAIN_MENU_INDICATORS = [
@@ -93,13 +98,17 @@ class AutoStartGameModule:
         self.retry_delay = 10
         
         # Enhanced timing settings - more conservative
-        self.screenshot_retry_delay = 3  # Longer delay between retries
-        self.max_screenshot_retries = 3  # Keep at 3
-        self.game_load_timeout = 90  # Longer timeout for game loading
-        self.dialog_check_interval = 4  # Longer interval between checks
+        self.screenshot_retry_delay = 3
+        self.max_screenshot_retries = 3
+        self.game_load_timeout = 90
+        self.dialog_check_interval = 4
         
         os.makedirs(self.templates_dir, exist_ok=True)
-        self.log_message(f"✅ AutoStartGame module initialized for {instance_name}")
+        
+        # FIXED: Only log initialization once
+        if not hasattr(self.__class__, '_init_logged'):
+            self.log_message(f"✅ AutoStartGame module initialized for {instance_name}")
+            self.__class__._init_logged = True
     
     def _setup_logging(self) -> logging.Logger:
         """Setup logging for the module"""
@@ -113,12 +122,37 @@ class AutoStartGameModule:
         return logger
     
     def log_message(self, message: str):
-        """Log message to console and callback"""
+        """FIXED: Log message with spam reduction"""
+        # Filter out repetitive messages
+        if self._is_spam_message(message):
+            return
+            
         timestamp = datetime.now().strftime("[%H:%M:%S]")
         full_message = f"{timestamp} [AutoStartGame-{self.instance_name}] {message}"
         self.logger.info(message)
         if self.console_callback:
             self.console_callback(full_message)
+    
+    def _is_spam_message(self, message: str) -> bool:
+        """Check if message is spam and should be filtered"""
+        spam_keywords = [
+            "Cleaned up AutoStartGame for stopped instance",
+            "Status monitoring",
+            "Checking instance status",
+            "routine check",
+            "periodic update",
+            "execute cycle"
+        ]
+        
+        for keyword in spam_keywords:
+            if keyword in message:
+                # Only allow one cleanup/status message per 60 seconds
+                current_time = time.time()
+                if current_time - self._last_cleanup_time < 60:
+                    return True
+                self._last_cleanup_time = current_time
+                
+        return False
     
     def is_available(self) -> bool:
         """Check if module dependencies are available"""
@@ -152,16 +186,17 @@ class AutoStartGameModule:
             if time_since_success < 300:  # Don't restart within 5 minutes
                 self.log_message(f"⏸ Game already started successfully {int(time_since_success)}s ago, skipping")
                 if on_complete:
-                    on_complete(True)  # Report success since game is already started
+                    on_complete(True)
                 return True
         
         # SMART CHECK: First verify if game is already running
         if self._is_game_already_running():
             self.log_message(f"✅ Game is already running for {target_instance}, verifying stability...")
-            # Even if detected, verify it's stable
             if self._verify_stable_game_state():
                 self.game_start_completed = True
                 self.last_successful_start = datetime.now()
+                # NEW: Mark game as accessible for other modules
+                self._mark_game_accessible()
                 if on_complete:
                     on_complete(True)
                 return True
@@ -209,6 +244,8 @@ class AutoStartGameModule:
                 if success:
                     self.game_start_completed = True
                     self.last_successful_start = datetime.now()
+                    # NEW: Mark game as accessible for other modules
+                    self._mark_game_accessible()
                 
                 if task_info['on_complete']:
                     task_info['on_complete'](success)
@@ -229,12 +266,59 @@ class AutoStartGameModule:
         self.log_message(f"🎮 AutoStartGame started for {target_instance}")
         return True
     
+    def _mark_game_accessible(self):
+        """NEW: Mark game as accessible in shared state for other modules"""
+        try:
+            # Set shared state for AutoGather and other modules
+            if hasattr(self.instance_manager, 'shared_state'):
+                if not hasattr(self.instance_manager, 'shared_state'):
+                    self.instance_manager.shared_state = {}
+                
+                # Set game accessibility state
+                game_state = {
+                    f"game_accessible_{self.instance_name}": True,
+                    f"game_world_active_{self.instance_name}": True,
+                    f"autostart_completed_{self.instance_name}": True,
+                    f"last_game_check_{self.instance_name}": datetime.now().isoformat()
+                }
+                
+                self.instance_manager.shared_state.update(game_state)
+                self.log_message("✅ Game marked as accessible for other modules")
+            
+            # Also try to set it directly on the instance manager
+            if hasattr(self.instance_manager, 'set_game_accessible'):
+                self.instance_manager.set_game_accessible(self.instance_name, True)
+                
+        except Exception as e:
+            # Don't fail if shared state setting fails
+            print(f"[AutoStartGame] Warning: Could not set shared state: {e}")
+    
+    def _clear_game_accessible(self):
+        """NEW: Clear game accessibility when instance stops"""
+        try:
+            if hasattr(self.instance_manager, 'shared_state'):
+                # Clear game accessibility state
+                keys_to_remove = [
+                    f"game_accessible_{self.instance_name}",
+                    f"game_world_active_{self.instance_name}",
+                    f"autostart_completed_{self.instance_name}"
+                ]
+                
+                for key in keys_to_remove:
+                    self.instance_manager.shared_state.pop(key, None)
+            
+            if hasattr(self.instance_manager, 'set_game_accessible'):
+                self.instance_manager.set_game_accessible(self.instance_name, False)
+                
+        except Exception as e:
+            print(f"[AutoStartGame] Warning: Could not clear shared state: {e}")
+    
     def _is_game_already_running(self) -> bool:
         """SMART: Check if game is already running before starting"""
         try:
             screenshot_path = self._take_screenshot_with_retries_simple()
             if not screenshot_path:
-                return False  # Can't determine, assume not running
+                return False
             
             try:
                 # Check for game world indicators
@@ -253,7 +337,7 @@ class AutoStartGameModule:
     
     def _take_screenshot_with_retries_simple(self) -> Optional[str]:
         """Simple screenshot with fewer retries for quick checks"""
-        for attempt in range(2):  # Only 2 attempts for quick check
+        for attempt in range(2):
             screenshot_path = self._take_screenshot(self._get_instance_index())
             if screenshot_path:
                 return screenshot_path
@@ -273,39 +357,44 @@ class AutoStartGameModule:
         target_instance = instance_name or self.instance_name
         
         if target_instance not in self.running_tasks:
-            self.log_message(f"⚠️ No AutoStartGame running for {target_instance}")
             return False
         
         task_info = self.running_tasks[target_instance]
         task_info['status'] = 'stopping'
         
-        self.log_message(f"🛑 AutoStartGame stop requested for {target_instance}")
-        
         # Wait a moment for graceful shutdown
         try:
             thread = task_info.get('thread')
             if thread and thread.is_alive():
-                thread.join(timeout=5)  # Wait up to 5 seconds
+                thread.join(timeout=5)
         except:
             pass
         
         # Force cleanup if still in running tasks
         if target_instance in self.running_tasks:
             del self.running_tasks[target_instance]
-            self.log_message(f"🧹 Force cleaned up AutoStartGame task for {target_instance}")
         
         return True
     
     def cleanup_for_stopped_instance(self):
-        """Cleanup when instance is stopped"""
+        """FIXED: Cleanup when instance is stopped - REDUCED SPAM"""
+        current_time = time.time()
+        
+        # Only log cleanup once per minute to prevent spam
+        if current_time - self._last_cleanup_time > 60:
+            self.log_message(f"🧹 Cleaned up AutoStartGame for stopped instance: {self.instance_name}")
+            self._last_cleanup_time = current_time
+        
+        # Always perform cleanup, just don't always log it
         self.game_start_completed = False
         self.last_successful_start = None
+        
+        # Clear game accessibility state
+        self._clear_game_accessible()
         
         # Stop any running tasks
         for instance_name in list(self.running_tasks.keys()):
             self.stop_auto_game(instance_name)
-        
-        self.log_message(f"🧹 Cleaned up AutoStartGame for stopped instance: {self.instance_name}")
     
     def get_status(self, instance_name: str = None) -> Optional[Dict]:
         """Get current status of AutoStartGame for this instance"""
@@ -465,7 +554,6 @@ class AutoStartGameModule:
             
             # Verify screenshot exists and is valid
             if os.path.exists(local_screenshot) and os.path.getsize(local_screenshot) > 10000:
-                self.log_message(f"📸 Screenshot taken: {os.path.basename(local_screenshot)}")
                 return local_screenshot
             
             return None
@@ -526,7 +614,6 @@ class AutoStartGameModule:
                 _, max_val, _, max_loc = cv2.minMaxLoc(result)
                 
                 if max_val >= self.confidence_threshold:
-                    self.log_message(f"✅ Found template: {template_name} (confidence: {max_val:.3f})")
                     return template_name
             
             return None
@@ -663,8 +750,6 @@ class AutoStartGameModule:
             
         except Exception as e:
             return False
-    
-    # REMOVED: _try_strategic_clicks method - was causing false successes
     
     def _wait_for_game_to_load(self, task_info: Dict) -> bool:
         """Wait for game to load with MUCH smarter detection"""
@@ -870,9 +955,8 @@ class AutoStartGameModule:
             self.log_message(f"❌ {instance_name} error verifying stability: {str(e)}")
             return False
     
-    # Methods for integration with module system
     def execute_cycle(self) -> bool:
-        """SMART: Execute cycle - only run if needed"""
+        """SMART: Execute cycle - only run if needed with spam reduction"""
         try:
             instance = self.instance_manager.get_instance(self.instance_name)
             if not instance:
@@ -891,20 +975,17 @@ class AutoStartGameModule:
                     if not self.game_start_completed:
                         self.game_start_completed = True
                         self.last_successful_start = datetime.now()
-                        self.auto_start_status = "completed"
+                        self._mark_game_accessible()  # NEW: Mark accessible
                         self.log_message(f"✅ {self.instance_name} game already running and stable")
-                        
-                        # Notify module system
-                        if hasattr(self, 'module_manager') and self.module_manager:
-                            try:
-                                self.module_manager.on_autostart_completed(self.instance_name)
-                                self.log_message(f"🎯 {self.instance_name} notified module system of existing game")
-                            except Exception as e:
-                                self.log_message(f"⚠️ {self.instance_name} failed to notify module system: {e}")
                     
                     return True
                 
-                self.log_message(f"🎯 Auto-triggering game start for running instance: {self.instance_name}")
+                # REDUCED LOGGING: Only log when actually starting
+                current_time = time.time()
+                if current_time - self._last_status_log > 60:  # Only log every minute
+                    self.log_message(f"🎯 Auto-triggering game start for running instance: {self.instance_name}")
+                    self._last_status_log = current_time
+                
                 return self.start_auto_game()
             
             return True
@@ -917,14 +998,15 @@ class AutoStartGameModule:
         """Reset completion status - call this when instance is restarted"""
         self.game_start_completed = False
         self.last_successful_start = None
+        self._clear_game_accessible()
         self.log_message(f"🔄 Reset completion status for {self.instance_name}")
     
     def get_module_info(self) -> Dict:
         """Get module information"""
         return {
             "name": "AutoStartGame",
-            "version": "2.2.0",
-            "description": "Smart game auto-starter that prevents duplicate runs",
+            "version": "2.3.0",
+            "description": "Complete game auto-starter with shared state management and spam reduction",
             "author": "BENSON v2.0",
             "instance_name": self.instance_name,
             "dependencies": self.get_missing_dependencies(),
@@ -938,6 +1020,39 @@ class AutoStartGameModule:
                 "Smart game state detection",
                 "Careful dialog handling", 
                 "Quick game running checks",
-                "Strategic clicking only"
+                "Strategic clicking only",
+                "Reduced console spam",
+                "Proper module communication",
+                "Shared state management"
             ]
         }
+    
+    def is_game_accessible(self) -> bool:
+        """Check if game is accessible for other modules"""
+        return self.game_start_completed and self.last_successful_start is not None
+    
+    def get_shared_state_info(self) -> Dict:
+        """Get shared state information for debugging"""
+        try:
+            shared_info = {}
+            if hasattr(self.instance_manager, 'shared_state'):
+                for key, value in self.instance_manager.shared_state.items():
+                    if self.instance_name in key:
+                        shared_info[key] = value
+            return shared_info
+        except Exception as e:
+            return {"error": str(e)}
+    
+    def force_mark_accessible(self):
+        """Force mark game as accessible (for manual override)"""
+        self.game_start_completed = True
+        self.last_successful_start = datetime.now()
+        self._mark_game_accessible()
+        self.log_message(f"🔧 Force marked {self.instance_name} as accessible")
+    
+    def force_clear_accessible(self):
+        """Force clear game accessibility (for manual override)"""
+        self.game_start_completed = False
+        self.last_successful_start = None
+        self._clear_game_accessible()
+        self.log_message(f"🔧 Force cleared {self.instance_name} accessibility")
