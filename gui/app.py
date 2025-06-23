@@ -639,7 +639,8 @@ class BensonApp(tk.Tk):
         def start_with_optimization():
             try:
                 self.add_console_message(f"🔧 Auto-optimizing {name} before start...")
-                success = self.instance_manager.optimize_instance_with_settings(name)
+                # FIXED: Use the correct method name
+                success = self.instance_manager.optimize_instance_settings(name)
                 if success:
                     self.add_console_message(f"✅ {name} optimized successfully")
                 else:
