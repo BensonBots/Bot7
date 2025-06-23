@@ -1,7 +1,6 @@
 """
-BENSON v2.0 - AutoStartGame Module
-Automatically starts the game on MEmu instances using image detection and UI automation
-Based on the Java AutoStartGameTask implementation with improved ad handling
+BENSON v2.0 - Smart AutoStartGame Module
+Fixed to prevent duplicate runs and unnecessary dialog clicking
 """
 
 import os
@@ -22,62 +21,89 @@ except ImportError:
 
 
 class AutoStartGameModule:
-    """AutoStartGame module for BENSON - Python implementation of Java AutoStartGameTask"""
+    """Smart AutoStartGame that only runs when needed and detects game state properly"""
     
-    def __init__(self, instance_manager, console_callback: Callable = None):
-        self.instance_manager = instance_manager
+    def __init__(self, instance_name: str, shared_resources, console_callback: Callable = None):
+        self.instance_name = instance_name
+        self.instance_manager = shared_resources
         self.console_callback = console_callback or print
         self.logger = self._setup_logging()
         
         # Module state tracking
-        self.running_tasks = {}  # instance_name -> task_info
-        self.template_cache = {}  # Cache for loaded templates
+        self.running_tasks = {}
+        self.template_cache = {}
         
-        # Game state detection templates - matching Java version
+        # CRITICAL: Track if we've already successfully started the game
+        self.game_start_completed = False
+        self.last_successful_start = None
+        
+        # Enhanced game state detection templates
         self.MAIN_MENU_INDICATORS = [
             "game_launcher.png"
         ]
         
+        # Expanded game world indicators
         self.GAME_WORLD_INDICATORS = [
             "world.png",
             "world_icon.png", 
             "town_icon.png",
-            "game_icon.png"
+            "game_icon.png",
+            "home_button.png",
+            "castle.png",
+            "build_button.png",
+            "march_button.png",
+            "alliance_button.png"
         ]
         
         self.PLAY_BUTTONS = [
             "game_launcher.png",
             "deploy_button.png",
             "play.png",
-            "start.png"
+            "start.png",
+            "play_button.png",
+            "enter_game.png"
         ]
         
+        # Enhanced close/dialog buttons
         self.CLOSE_BUTTONS = [
             "close_x.png",
             "close_x2.png", 
             "close_x3.png",
             "close_x4.png",
-            "close_x5.png"
+            "close_x5.png",
+            "close_btn.png",
+            "cancel_btn.png",
+            "ok_btn.png",
+            "confirm_btn.png",
+            "skip_btn.png"
         ]
         
-        self.GENERIC_ELEMENTS = [
-            "deploy_button.png",
-            "search_button.png",
-            "details_button.png"
+        # Loading screen indicators
+        self.LOADING_INDICATORS = [
+            "loading.png",
+            "loading_bar.png",
+            "connecting.png",
+            "please_wait.png"
         ]
         
         # Configuration
-        self.templates_dir = "templates"  # Directory containing template images
+        self.templates_dir = "templates"
         self.confidence_threshold = 0.6
         self.default_max_retries = 3
-        self.retry_delay = 10  # seconds
+        self.retry_delay = 10
         
-        # Create templates directory if it doesn't exist
+        # Enhanced timing settings - more conservative
+        self.screenshot_retry_delay = 3  # Longer delay between retries
+        self.max_screenshot_retries = 3  # Keep at 3
+        self.game_load_timeout = 90  # Longer timeout for game loading
+        self.dialog_check_interval = 4  # Longer interval between checks
+        
         os.makedirs(self.templates_dir, exist_ok=True)
+        self.log_message(f"✅ AutoStartGame module initialized for {instance_name}")
     
     def _setup_logging(self) -> logging.Logger:
         """Setup logging for the module"""
-        logger = logging.getLogger('AutoStartGame')
+        logger = logging.getLogger(f'AutoStartGame-{self.instance_name}')
         if not logger.handlers:
             handler = logging.StreamHandler()
             formatter = logging.Formatter('[%(name)s] %(message)s')
@@ -89,7 +115,7 @@ class AutoStartGameModule:
     def log_message(self, message: str):
         """Log message to console and callback"""
         timestamp = datetime.now().strftime("[%H:%M:%S]")
-        full_message = f"{timestamp} {message}"
+        full_message = f"{timestamp} [AutoStartGame-{self.instance_name}] {message}"
         self.logger.info(message)
         if self.console_callback:
             self.console_callback(full_message)
@@ -99,7 +125,6 @@ class AutoStartGameModule:
         if not CV2_AVAILABLE:
             return False
         
-        # Check if MEmu is available
         if not hasattr(self.instance_manager, '_is_memu_available'):
             return False
             
@@ -110,29 +135,58 @@ class AutoStartGameModule:
         missing = []
         if not CV2_AVAILABLE:
             missing.append("opencv-python")
+        
+        if not hasattr(self.instance_manager, '_is_memu_available') or not self.instance_manager._is_memu_available():
+            missing.append("memu_not_available")
+            
         return missing
     
-    def start_auto_game(self, instance_name: str, max_retries: int = None, 
+    def start_auto_game(self, instance_name: str = None, max_retries: int = None, 
                        on_complete: Callable = None) -> bool:
-        """Start AutoStartGame for an instance"""
+        """SMART: Only start if game isn't already running and we haven't completed recently"""
+        target_instance = instance_name or self.instance_name
+        
+        # CRITICAL CHECK: Don't start if we've already successfully started the game recently
+        if self.game_start_completed and self.last_successful_start:
+            time_since_success = (datetime.now() - self.last_successful_start).total_seconds()
+            if time_since_success < 300:  # Don't restart within 5 minutes
+                self.log_message(f"⏸ Game already started successfully {int(time_since_success)}s ago, skipping")
+                if on_complete:
+                    on_complete(True)  # Report success since game is already started
+                return True
+        
+        # SMART CHECK: First verify if game is already running
+        if self._is_game_already_running():
+            self.log_message(f"✅ Game is already running for {target_instance}, verifying stability...")
+            # Even if detected, verify it's stable
+            if self._verify_stable_game_state():
+                self.game_start_completed = True
+                self.last_successful_start = datetime.now()
+                if on_complete:
+                    on_complete(True)
+                return True
+            else:
+                self.log_message(f"⚠️ Game detected but unstable, proceeding with start process...")
+        
         if not self.is_available():
-            self.log_message(f"❌ AutoStartGame not available - missing dependencies: {self.get_missing_dependencies()}")
+            missing_deps = self.get_missing_dependencies()
+            self.log_message(f"❌ AutoStartGame not available - missing: {missing_deps}")
             return False
         
-        if instance_name in self.running_tasks:
-            self.log_message(f"⚠️ AutoStartGame already running for {instance_name}")
+        if target_instance in self.running_tasks:
+            self.log_message(f"⚠️ AutoStartGame already running for {target_instance}")
             return False
         
-        instance = self.instance_manager.get_instance(instance_name)
+        instance = self.instance_manager.get_instance(target_instance)
         if not instance:
-            self.log_message(f"❌ Instance {instance_name} not found")
+            self.log_message(f"❌ Instance {target_instance} not found")
             return False
         
         max_retries = max_retries or self.default_max_retries
         
         # Create task info
         task_info = {
-            'instance_name': instance_name,
+            'instance_name': target_instance,
             'instance_index': instance['index'],
             'max_retries': max_retries,
             'current_attempt': 0,
@@ -142,51 +196,132 @@ class AutoStartGameModule:
             'thread': None
         }
         
-        self.running_tasks[instance_name] = task_info
+        self.running_tasks[target_instance] = task_info
         
         # Start the task in a background thread
         def run_task():
             try:
+                self.log_message(f"🚀 Starting AutoStartGame task for {target_instance}")
                 success = self._run_auto_start_task(task_info)
                 task_info['status'] = 'completed' if success else 'failed'
+                
+                # Mark completion status
+                if success:
+                    self.game_start_completed = True
+                    self.last_successful_start = datetime.now()
                 
                 if task_info['on_complete']:
                     task_info['on_complete'](success)
                     
+                self.log_message(f"🏁 AutoStartGame task completed for {target_instance}: {'SUCCESS' if success else 'FAILED'}")
+                    
             except Exception as e:
-                self.log_message(f"❌ {instance_name} AutoStartGame error: {str(e)}")
+                self.log_message(f"❌ {target_instance} AutoStartGame error: {str(e)}")
                 task_info['status'] = 'error'
             finally:
-                # Clean up task
-                if instance_name in self.running_tasks:
-                    del self.running_tasks[instance_name]
+                if target_instance in self.running_tasks:
+                    del self.running_tasks[target_instance]
         
-        task_thread = threading.Thread(target=run_task, daemon=True)
+        task_thread = threading.Thread(target=run_task, daemon=True, name=f"AutoStart-{target_instance}")
         task_info['thread'] = task_thread
         task_thread.start()
         
-        self.log_message(f"🎮 AutoStartGame started for {instance_name}")
+        self.log_message(f"🎮 AutoStartGame started for {target_instance}")
         return True
     
-    def stop_auto_game(self, instance_name: str) -> bool:
-        """Stop AutoStartGame for an instance"""
-        if instance_name not in self.running_tasks:
-            self.log_message(f"⚠️ No AutoStartGame running for {instance_name}")
+    def _is_game_already_running(self) -> bool:
+        """SMART: Check if game is already running before starting"""
+        try:
+            screenshot_path = self._take_screenshot_with_retries_simple()
+            if not screenshot_path:
+                return False  # Can't determine, assume not running
+            
+            try:
+                # Check for game world indicators
+                if self._find_any_template(screenshot_path, self.GAME_WORLD_INDICATORS):
+                    self.log_message("🎮 Game world detected - game is already running")
+                    return True
+                
+                return False
+                
+            finally:
+                self._cleanup_screenshot(screenshot_path)
+                
+        except Exception as e:
+            self.log_message(f"❌ Error checking if game is running: {e}")
+            return False
+    
+    def _take_screenshot_with_retries_simple(self) -> Optional[str]:
+        """Simple screenshot with fewer retries for quick checks"""
+        for attempt in range(2):  # Only 2 attempts for quick check
+            screenshot_path = self._take_screenshot(self._get_instance_index())
+            if screenshot_path:
+                return screenshot_path
+            time.sleep(1)
+        return None
+    
+    def _get_instance_index(self) -> int:
+        """Get instance index for this module's instance"""
+        try:
+            instance = self.instance_manager.get_instance(self.instance_name)
+            return instance['index'] if instance else 1
+        except:
+            return 1
+    
+    def stop_auto_game(self, instance_name: str = None) -> bool:
+        """Stop AutoStartGame for this instance"""
+        target_instance = instance_name or self.instance_name
+        
+        if target_instance not in self.running_tasks:
+            self.log_message(f"⚠️ No AutoStartGame running for {target_instance}")
             return False
         
-        task_info = self.running_tasks[instance_name]
+        task_info = self.running_tasks[target_instance]
         task_info['status'] = 'stopping'
         
-        # Note: We can't directly stop threads in Python, but we set status for checks
-        self.log_message(f"🛑 AutoStartGame stop requested for {instance_name}")
+        self.log_message(f"🛑 AutoStartGame stop requested for {target_instance}")
+        
+        # Wait a moment for graceful shutdown
+        try:
+            thread = task_info.get('thread')
+            if thread and thread.is_alive():
+                thread.join(timeout=5)  # Wait up to 5 seconds
+        except:
+            pass
+        
+        # Force cleanup if still in running tasks
+        if target_instance in self.running_tasks:
+            del self.running_tasks[target_instance]
+            self.log_message(f"🧹 Force cleaned up AutoStartGame task for {target_instance}")
+        
         return True
     
-    def get_status(self, instance_name: str) -> Optional[Dict]:
-        """Get current status of AutoStartGame for an instance"""
-        if instance_name not in self.running_tasks:
+    def cleanup_for_stopped_instance(self):
+        """Cleanup when instance is stopped"""
+        self.game_start_completed = False
+        self.last_successful_start = None
+        
+        # Stop any running tasks
+        for instance_name in list(self.running_tasks.keys()):
+            self.stop_auto_game(instance_name)
+        
+        self.log_message(f"🧹 Cleaned up AutoStartGame for stopped instance: {self.instance_name}")
+    
+    def get_status(self, instance_name: str = None) -> Optional[Dict]:
+        """Get current status of AutoStartGame for this instance"""
+        target_instance = instance_name or self.instance_name
+        
+        if target_instance not in self.running_tasks:
+            # Return success if game was completed recently
+            if self.game_start_completed:
+                return {
+                    'status': 'completed_successfully',
+                    'last_completion': self.last_successful_start,
+                    'game_running': True
+                }
             return None
         
-        task_info = self.running_tasks[instance_name]
+        task_info = self.running_tasks[target_instance]
         elapsed_time = (datetime.now() - task_info['start_time']).total_seconds()
         
         return {
@@ -204,70 +339,86 @@ class AutoStartGameModule:
     def _run_auto_start_task(self, task_info: Dict) -> bool:
         """Main AutoStartGame task implementation"""
         instance_name = task_info['instance_name']
-        instance_index = task_info['instance_index']
         max_retries = task_info['max_retries']
         
         self.log_message(f"🎮 Auto Start Game started for {instance_name}")
         
-        game_started = False
-        
         for attempt in range(1, max_retries + 1):
             if task_info['status'] == 'stopping':
+                self.log_message(f"🛑 AutoStart stopped for {instance_name}")
                 break
                 
             task_info['current_attempt'] = attempt
             self.log_message(f"🔄 {instance_name} Auto Start attempt {attempt}/{max_retries}")
             
             if self._attempt_game_start(task_info):
-                game_started = True
-                break
+                self.log_message(f"✅ {instance_name} game started successfully after {attempt} attempt(s)")
+                return True
             
             if attempt < max_retries:
                 self.log_message(f"⏳ {instance_name} waiting {self.retry_delay}s before retry")
-                time.sleep(self.retry_delay)
+                for i in range(self.retry_delay):
+                    if task_info['status'] == 'stopping':
+                        return False
+                    time.sleep(1)
         
-        if game_started:
-            self.log_message(f"✅ {instance_name} game started successfully after {task_info['current_attempt']} attempt(s)")
-            return True
-        else:
-            self.log_message(f"❌ {instance_name} failed to start game after {max_retries} attempts")
-            return False
+        self.log_message(f"❌ {instance_name} failed to start game after {max_retries} attempts")
+        return False
     
     def _attempt_game_start(self, task_info: Dict) -> bool:
-        """Attempt to start the game - main logic"""
+        """Attempt to start the game with smarter detection"""
         instance_name = task_info['instance_name']
-        instance_index = task_info['instance_index']
         
         try:
-            # Step 1: Take screenshot
-            screenshot_path = self._take_screenshot(instance_index)
+            # Step 1: Take screenshot with retries
+            screenshot_path = self._take_screenshot_with_retries(task_info)
             if not screenshot_path:
-                self.log_message(f"❌ {instance_name} failed to take screenshot")
+                self.log_message(f"❌ {instance_name} failed to take initial screenshot")
                 return False
             
-            # Step 2: Detect current game state
-            game_state = self._detect_game_state(screenshot_path, instance_name)
-            self.log_message(f"🔍 {instance_name} detected state: {game_state}")
-            
-            # Step 3: Handle based on current state
-            if game_state == "ALREADY_IN_GAME":
-                self.log_message(f"✅ {instance_name} game is already running")
-                return True
-            elif game_state == "MAIN_MENU":
-                return self._start_from_main_menu(task_info, screenshot_path)
-            else:
-                return self._handle_unknown_state(task_info, screenshot_path)
+            try:
+                # Step 2: Detect current game state
+                game_state = self._detect_game_state(screenshot_path, instance_name)
+                self.log_message(f"🔍 {instance_name} detected state: {game_state}")
+                
+                # Step 3: Handle based on current state
+                if game_state == "ALREADY_IN_GAME":
+                    self.log_message(f"✅ {instance_name} game is already running")
+                    return True
+                elif game_state == "LOADING":
+                    self.log_message(f"⏳ {instance_name} game is loading, waiting...")
+                    return self._wait_for_game_to_load(task_info)
+                elif game_state == "MAIN_MENU":
+                    return self._start_from_main_menu(task_info, screenshot_path)
+                else:
+                    return self._handle_unknown_state_smart(task_info, screenshot_path)
+                    
+            finally:
+                self._cleanup_screenshot(screenshot_path)
                 
         except Exception as e:
             self.log_message(f"❌ {instance_name} error in game start attempt: {str(e)}")
             return False
-        finally:
-            # Clean up screenshot
-            try:
-                if 'screenshot_path' in locals() and screenshot_path:
-                    os.remove(screenshot_path)
-            except:
-                pass
+    
+    def _take_screenshot_with_retries(self, task_info: Dict) -> Optional[str]:
+        """Take screenshot with multiple retries"""
+        instance_name = task_info['instance_name']
+        instance_index = task_info['instance_index']
+        
+        for attempt in range(self.max_screenshot_retries):
+            if task_info['status'] == 'stopping':
+                return None
+                
+            screenshot_path = self._take_screenshot(instance_index)
+            if screenshot_path:
+                return screenshot_path
+            
+            if attempt < self.max_screenshot_retries - 1:
+                self.log_message(f"⚠️ {instance_name} screenshot attempt {attempt + 1} failed, retrying...")
+                time.sleep(self.screenshot_retry_delay)
+        
+        self.log_message(f"❌ {instance_name} all screenshot attempts failed")
+        return None
     
     def _take_screenshot(self, instance_index: int) -> Optional[str]:
         """Take screenshot using MEmu's ADB wrapper"""
@@ -289,7 +440,7 @@ class AutoStartGameModule:
             if capture_result.returncode != 0:
                 return None
             
-            time.sleep(0.5)  # Wait for file to be written
+            time.sleep(0.5)
             
             # Pull screenshot from device
             pull_cmd = [
@@ -312,22 +463,27 @@ class AutoStartGameModule:
             except:
                 pass
             
-            # Verify screenshot exists
+            # Verify screenshot exists and is valid
             if os.path.exists(local_screenshot) and os.path.getsize(local_screenshot) > 10000:
+                self.log_message(f"📸 Screenshot taken: {os.path.basename(local_screenshot)}")
                 return local_screenshot
             
             return None
             
         except Exception as e:
-            self.logger.error(f"Error taking screenshot: {e}")
+            self.log_message(f"❌ Error taking screenshot: {e}")
             return None
     
     def _detect_game_state(self, screenshot_path: str, instance_name: str) -> str:
-        """Detect current game state using template matching"""
+        """Enhanced game state detection"""
         try:
-            # Check for game world first (already in game)
+            # Check for game world first (highest priority)
             if self._find_any_template(screenshot_path, self.GAME_WORLD_INDICATORS):
                 return "ALREADY_IN_GAME"
+            
+            # Check for loading screens
+            if self._find_any_template(screenshot_path, self.LOADING_INDICATORS):
+                return "LOADING"
             
             # Check for main menu
             if self._find_any_template(screenshot_path, self.MAIN_MENU_INDICATORS):
@@ -370,210 +526,215 @@ class AutoStartGameModule:
                 _, max_val, _, max_loc = cv2.minMaxLoc(result)
                 
                 if max_val >= self.confidence_threshold:
+                    self.log_message(f"✅ Found template: {template_name} (confidence: {max_val:.3f})")
                     return template_name
             
             return None
             
         except Exception as e:
-            self.logger.error(f"Error in template matching: {e}")
+            self.log_message(f"❌ Error in template matching: {e}")
             return None
     
     def _start_from_main_menu(self, task_info: Dict, screenshot_path: str) -> bool:
         """Start game from main menu"""
         instance_name = task_info['instance_name']
-        instance_index = task_info['instance_index']
         
         try:
             self.log_message(f"🎮 {instance_name} starting game from main menu")
             
             # Try to find and click play button
             for play_button in self.PLAY_BUTTONS:
-                if self._click_template(screenshot_path, play_button, instance_index, instance_name):
+                if self._click_template(screenshot_path, play_button, task_info):
                     self.log_message(f"✅ {instance_name} clicked {play_button}")
                     
                     # Wait for game to load
                     return self._wait_for_game_to_load(task_info)
             
-            # No play buttons found, try common positions
-            self.log_message(f"⚠️ {instance_name} no play buttons found, trying common positions")
-            return self._handle_unknown_state(task_info, screenshot_path)
+            # No play buttons found
+            self.log_message(f"⚠️ {instance_name} no play buttons found")
+            return False
             
         except Exception as e:
             self.log_message(f"❌ {instance_name} error starting from main menu: {str(e)}")
             return False
     
-    def _handle_unknown_state(self, task_info: Dict, screenshot_path: str) -> bool:
-        """Handle unknown state with improved ad handling"""
+    def _handle_unknown_state_smart(self, task_info: Dict, screenshot_path: str) -> bool:
+        """SMART: Handle unknown state with VERY careful dialog detection"""
         instance_name = task_info['instance_name']
-        instance_index = task_info['instance_index']
         
         try:
-            self.log_message(f"❓ {instance_name} handling unknown state with improved ad detection")
+            self.log_message(f"❓ {instance_name} handling unknown state with enhanced dialog detection")
             
-            # Take multiple screenshots and handle ads iteratively
-            max_ad_attempts = 5  # Handle up to 5 consecutive ads
+            # CRITICAL: Only try to close dialogs if we actually find close button templates
+            dialog_found = False
+            close_button_found = None
             
-            for ad_attempt in range(max_ad_attempts):
-                # Take fresh screenshot for this attempt
-                current_screenshot = self._take_screenshot(instance_index)
-                if not current_screenshot:
-                    current_screenshot = screenshot_path
-                
-                self.log_message(f"🔍 {instance_name} ad handling attempt {ad_attempt + 1}/{max_ad_attempts}")
-                
-                # Look for close buttons first (ads usually have these)
-                ad_closed = False
-                for close_btn in self.CLOSE_BUTTONS:
-                    if self._click_template(current_screenshot, close_btn, instance_index, instance_name):
-                        self.log_message(f"❌ {instance_name} closed ad/dialog with {close_btn}")
-                        ad_closed = True
-                        time.sleep(2)  # Wait for ad to disappear
-                        break
-                
-                # If no close button found, try clicking center to dismiss
-                if not ad_closed:
-                    self.log_message(f"🎯 {instance_name} clicking center to dismiss dialogs")
-                    self._click_position(instance_index, 240, 400)
-                    time.sleep(2)
-                
-                # Clean up current screenshot if it's different from original
-                if current_screenshot != screenshot_path:
-                    try:
-                        os.remove(current_screenshot)
-                    except:
-                        pass
-                
-                # Check if we've reached a known state after handling ads
-                time.sleep(1)
-                check_screenshot = self._take_screenshot(instance_index)
-                if check_screenshot:
-                    new_state = self._detect_game_state(check_screenshot, instance_name)
+            # Check each close button template to see if it actually exists
+            for close_button in self.CLOSE_BUTTONS:
+                if self._find_template_only(screenshot_path, close_button):
+                    self.log_message(f"🔍 {instance_name} found dialog with {close_button}")
+                    close_button_found = close_button
+                    dialog_found = True
+                    break
+            
+            if dialog_found and close_button_found:
+                # Only click if we actually found a dialog
+                if self._click_template(screenshot_path, close_button_found, task_info):
+                    self.log_message(f"❌ {instance_name} closed dialog with {close_button_found}")
+                    time.sleep(3)  # Wait longer after closing dialog
                     
+                    # CRITICAL: Check state again after closing dialog
+                    self.log_message(f"🔄 {instance_name} closed dialogs, rechecking state...")
+                    new_screenshot = self._take_screenshot_with_retries(task_info)
+                    if new_screenshot:
+                        try:
+                            new_state = self._detect_game_state(new_screenshot, instance_name)
+                            if new_state == "ALREADY_IN_GAME":
+                                # Verify stability before declaring success
+                                if self._verify_game_world_stable(task_info, new_screenshot):
+                                    self.log_message(f"✅ {instance_name} reached stable game after closing dialog")
+                                    return True
+                                else:
+                                    self.log_message(f"⚠️ {instance_name} game world unstable after dialog close")
+                            elif new_state == "MAIN_MENU":
+                                return self._start_from_main_menu(task_info, new_screenshot)
+                            else:
+                                self.log_message(f"⚠️ {instance_name} still in unknown state after dialog close")
+                        finally:
+                            self._cleanup_screenshot(new_screenshot)
+                else:
+                    self.log_message(f"❌ {instance_name} failed to click close button")
+            else:
+                # NO DIALOGS FOUND - this might be a loading screen or other state
+                self.log_message(f"🔍 {instance_name} no dialogs detected, checking if this is loading/transition state")
+                
+                # Wait a bit and check again - might be loading
+                time.sleep(5)
+                new_screenshot = self._take_screenshot_with_retries(task_info)
+                if new_screenshot:
                     try:
-                        os.remove(check_screenshot)
-                    except:
-                        pass
-                    
-                    if new_state == "ALREADY_IN_GAME":
-                        self.log_message(f"✅ {instance_name} reached game after ad handling")
-                        return True
-                    elif new_state == "MAIN_MENU":
-                        self.log_message(f"🎮 {instance_name} reached main menu after ad handling")
-                        return self._start_from_main_menu(task_info, screenshot_path)
-                
-                # If we're still in unknown state, continue to next ad attempt
-                self.log_message(f"⏳ {instance_name} still in unknown state, continuing ad cleanup...")
+                        new_state = self._detect_game_state(new_screenshot, instance_name)
+                        if new_state == "ALREADY_IN_GAME":
+                            # Verify stability before declaring success
+                            if self._verify_game_world_stable(task_info, new_screenshot):
+                                self.log_message(f"✅ {instance_name} game loaded and stable after waiting")
+                                return True
+                            else:
+                                self.log_message(f"⚠️ {instance_name} game world detected but unstable")
+                        elif new_state == "MAIN_MENU":
+                            self.log_message(f"↩️ {instance_name} back to main menu")
+                            return self._start_from_main_menu(task_info, new_screenshot)
+                        else:
+                            self.log_message(f"⏳ {instance_name} still in transition, continuing to wait...")
+                    finally:
+                        self._cleanup_screenshot(new_screenshot)
             
-            # After all ad attempts, try generic elements
-            self.log_message(f"🔧 {instance_name} trying generic UI elements")
-            final_screenshot = self._take_screenshot(instance_index)
-            if final_screenshot:
-                for element in self.GENERIC_ELEMENTS:
-                    if self._click_template(final_screenshot, element, instance_index, instance_name):
-                        self.log_message(f"🔄 {instance_name} clicked {element}")
-                        time.sleep(3)
-                        break
-                
-                try:
-                    os.remove(final_screenshot)
-                except:
-                    pass
-            
-            # Try common positions as final fallback
-            self.log_message(f"🎯 {instance_name} trying common click positions")
-            common_positions = [(240, 600), (240, 500), (240, 300), (400, 300), (80, 300)]
-            for x, y in common_positions:
-                self._click_position(instance_index, x, y)
-                time.sleep(1)
-            
-            # Final check after all attempts
-            time.sleep(3)
-            final_check_screenshot = self._take_screenshot(instance_index)
-            if final_check_screenshot:
-                final_state = self._detect_game_state(final_check_screenshot, instance_name)
-                
-                try:
-                    os.remove(final_check_screenshot)
-                except:
-                    pass
-                
-                if final_state == "ALREADY_IN_GAME":
-                    self.log_message(f"✅ {instance_name} successfully reached game after cleanup")
-                    return True
-                elif final_state == "MAIN_MENU":
-                    self.log_message(f"🎮 {instance_name} reached main menu after cleanup")
-                    return self._start_from_main_menu(task_info, screenshot_path)
-            
-            # If we still haven't reached a known state, assume success
-            self.log_message(f"✅ {instance_name} completed unknown state handling (assuming success)")
-            return True
+            # DON'T assume success - return False to continue waiting
+            self.log_message(f"⏳ {instance_name} unknown state handling incomplete, continuing...")
+            return False
             
         except Exception as e:
             self.log_message(f"❌ {instance_name} error handling unknown state: {str(e)}")
             return False
     
-    def _wait_for_game_to_load(self, task_info: Dict) -> bool:
-        """Wait for game to load after clicking play"""
-        instance_name = task_info['instance_name']
-        instance_index = task_info['instance_index']
+    def _find_template_only(self, screenshot_path: str, template_name: str) -> bool:
+        """Find template without clicking - just check if it exists with HIGH CONFIDENCE"""
+        if not CV2_AVAILABLE:
+            return False
         
         try:
-            self.log_message(f"⏳ {instance_name} waiting for game to load")
+            template_path = os.path.join(self.templates_dir, template_name)
+            if not os.path.exists(template_path):
+                return False
             
-            # Wait up to 60 seconds for game to load
-            for i in range(60):
+            screenshot = cv2.imread(screenshot_path)
+            template = cv2.imread(template_path)
+            
+            if screenshot is None or template is None:
+                return False
+            
+            result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(result)
+            
+            # HIGHER confidence threshold for dialog detection to avoid false positives
+            dialog_confidence_threshold = 0.8  # Much higher than normal 0.6
+            
+            return max_val >= dialog_confidence_threshold
+            
+        except Exception as e:
+            return False
+    
+    # REMOVED: _try_strategic_clicks method - was causing false successes
+    
+    def _wait_for_game_to_load(self, task_info: Dict) -> bool:
+        """Wait for game to load with MUCH smarter detection"""
+        instance_name = task_info['instance_name']
+        
+        try:
+            self.log_message(f"⏳ {instance_name} waiting for game to load (timeout: {self.game_load_timeout}s)")
+            
+            start_time = time.time()
+            check_count = 0
+            consecutive_unknown_states = 0
+            
+            while (time.time() - start_time) < self.game_load_timeout:
                 if task_info['status'] == 'stopping':
                     return False
                 
-                # Take screenshot and check for game world
-                screenshot_path = self._take_screenshot(instance_index)
-                if screenshot_path:
-                    # Check if we're back at main menu (game crashed)
-                    if self._find_any_template(screenshot_path, self.MAIN_MENU_INDICATORS):
-                        self.log_message(f"⚠️ {instance_name} detected game crash, retrying launcher")
-                        # Try clicking launcher again
-                        if self._click_template(screenshot_path, "game_launcher.png", instance_index, instance_name):
-                            self.log_message(f"✅ {instance_name} clicked launcher again after crash")
-                            try:
-                                os.remove(screenshot_path)
-                            except:
-                                pass
-                            # Reset timer and continue waiting
-                            continue
-                    
-                    # Check if game is loaded
-                    if self._find_any_template(screenshot_path, self.GAME_WORLD_INDICATORS):
-                        self.log_message(f"✅ {instance_name} game loaded successfully")
-                        try:
-                            os.remove(screenshot_path)
-                        except:
-                            pass
-                        return True
-                    
-                    # Check for error dialogs
-                    if self._find_any_template(screenshot_path, self.CLOSE_BUTTONS):
-                        self.log_message(f"⚠️ {instance_name} encountered dialog during loading")
-                        # Try to close it
-                        for close_btn in self.CLOSE_BUTTONS:
-                            if self._click_template(screenshot_path, close_btn, instance_index, instance_name):
-                                break
-                    
-                    try:
-                        os.remove(screenshot_path)
-                    except:
-                        pass
+                check_count += 1
                 
-                time.sleep(1)
+                # Take screenshot and check state
+                screenshot_path = self._take_screenshot_with_retries(task_info)
+                if screenshot_path:
+                    try:
+                        state = self._detect_game_state(screenshot_path, instance_name)
+                        
+                        if state == "ALREADY_IN_GAME":
+                            # CRITICAL: Verify stability before declaring success
+                            self.log_message(f"🎯 {instance_name} detected game world, verifying stability...")
+                            if self._verify_game_world_stable(task_info, screenshot_path):
+                                self.log_message(f"✅ {instance_name} game loaded successfully and stable (check #{check_count})")
+                                return True
+                            else:
+                                self.log_message(f"⚠️ {instance_name} game world unstable, continuing to wait...")
+                                consecutive_unknown_states = 0  # Reset counter
+                        elif state == "MAIN_MENU":
+                            self.log_message(f"⚠️ {instance_name} back at main menu, retrying launcher")
+                            if self._click_template(screenshot_path, "game_launcher.png", task_info):
+                                self.log_message(f"✅ {instance_name} clicked launcher again")
+                                consecutive_unknown_states = 0  # Reset counter
+                        elif state == "LOADING":
+                            self.log_message(f"⏳ {instance_name} still loading... (check #{check_count})")
+                            consecutive_unknown_states = 0  # Reset counter
+                        else:
+                            # Unknown state - be more careful
+                            consecutive_unknown_states += 1
+                            self.log_message(f"❓ {instance_name} unknown state (check #{check_count}, consecutive: {consecutive_unknown_states})")
+                            
+                            # Only try to handle dialogs if we've seen multiple unknown states
+                            if consecutive_unknown_states >= 2:
+                                # Try to handle unknown state, but DON'T assume success
+                                handled = self._handle_unknown_state_smart(task_info, screenshot_path)
+                                if handled:
+                                    return True
+                                consecutive_unknown_states = 0  # Reset after handling
+                            else:
+                                # Just wait - might be loading/transitioning
+                                self.log_message(f"⏳ {instance_name} waiting for state to stabilize...")
+                            
+                    finally:
+                        self._cleanup_screenshot(screenshot_path)
+                
+                time.sleep(self.dialog_check_interval)
             
-            self.log_message(f"❌ {instance_name} game failed to load within timeout")
+            self.log_message(f"❌ {instance_name} game failed to load within {self.game_load_timeout}s timeout")
             return False
             
         except Exception as e:
             self.log_message(f"❌ {instance_name} error waiting for game: {str(e)}")
             return False
     
-    def _click_template(self, screenshot_path: str, template_name: str, 
-                       instance_index: int, instance_name: str) -> bool:
+    def _click_template(self, screenshot_path: str, template_name: str, task_info: Dict) -> bool:
         """Click on a template if found"""
         if not CV2_AVAILABLE:
             return False
@@ -600,12 +761,12 @@ class AutoStartGameModule:
                 click_y = max_loc[1] + template_h // 2
                 
                 # Click the position
-                return self._click_position(instance_index, click_x, click_y)
+                return self._click_position(task_info['instance_index'], click_x, click_y)
             
             return False
             
         except Exception as e:
-            self.logger.error(f"Error clicking template {template_name}: {e}")
+            self.log_message(f"❌ Error clicking template {template_name}: {e}")
             return False
     
     def _click_position(self, instance_index: int, x: int, y: int) -> bool:
@@ -620,74 +781,163 @@ class AutoStartGameModule:
             ]
             
             result = subprocess.run(tap_cmd, capture_output=True, text=True, timeout=10)
-            return result.returncode == 0
+            success = result.returncode == 0
+            
+            if success:
+                self.log_message(f"👆 Clicked position ({x}, {y})")
+            else:
+                self.log_message(f"❌ Click failed at ({x}, {y}): {result.stderr}")
+                
+            return success
             
         except Exception as e:
-            self.logger.error(f"Error clicking position ({x}, {y}): {e}")
+            self.log_message(f"❌ Error clicking position ({x}, {y}): {e}")
             return False
+    
+    def _cleanup_screenshot(self, screenshot_path: Optional[str]):
+        """Safely cleanup screenshot file"""
+        if screenshot_path:
+            try:
+                os.remove(screenshot_path)
+            except:
+                pass
+    
+    def _verify_stable_game_state(self) -> bool:
+        """Quick verification that game state is stable (for initial checks)"""
+        try:
+            # Create a minimal task info for the verification
+            temp_task_info = {
+                'instance_name': self.instance_name,
+                'instance_index': self._get_instance_index(),
+                'status': 'checking'
+            }
+            
+            return self._verify_game_world_stable(temp_task_info)
+            
+        except Exception as e:
+            self.log_message(f"❌ Error verifying stable game state: {e}")
+            return False
+    
+    def _verify_game_world_stable(self, task_info: Dict, initial_screenshot_path: str = None) -> bool:
+        """Verify game world is stable for 2+ seconds, not just a loading flash"""
+        instance_name = task_info['instance_name']
+        
+        try:
+            self.log_message(f"🔍 {instance_name} verifying game world stability...")
+            
+            # Check initial state if screenshot provided
+            if initial_screenshot_path:
+                if not self._find_any_template(initial_screenshot_path, self.GAME_WORLD_INDICATORS):
+                    return False
+            
+            # Verify stability over multiple checks
+            stability_checks = 3  # Check 3 times
+            stable_detections = 0
+            
+            for check_num in range(stability_checks):
+                time.sleep(1)  # Wait 1 second between checks
+                
+                if task_info['status'] == 'stopping':
+                    return False
+                
+                screenshot_path = self._take_screenshot_with_retries(task_info)
+                if screenshot_path:
+                    try:
+                        # Check if game world indicators are still present
+                        found_template = self._find_any_template(screenshot_path, self.GAME_WORLD_INDICATORS)
+                        if found_template:
+                            stable_detections += 1
+                            self.log_message(f"✅ {instance_name} stability check {check_num + 1}/{stability_checks}: {found_template} found")
+                        else:
+                            self.log_message(f"❌ {instance_name} stability check {check_num + 1}/{stability_checks}: no game world detected")
+                            
+                    finally:
+                        self._cleanup_screenshot(screenshot_path)
+                else:
+                    self.log_message(f"❌ {instance_name} stability check {check_num + 1}/{stability_checks}: screenshot failed")
+            
+            # Require at least 2 out of 3 stable detections
+            is_stable = stable_detections >= 2
+            
+            if is_stable:
+                self.log_message(f"✅ {instance_name} game world confirmed stable ({stable_detections}/{stability_checks} checks)")
+            else:
+                self.log_message(f"❌ {instance_name} game world unstable ({stable_detections}/{stability_checks} checks) - likely loading flash")
+            
+            return is_stable
+            
+        except Exception as e:
+            self.log_message(f"❌ {instance_name} error verifying stability: {str(e)}")
+            return False
+    
+    # Methods for integration with module system
+    def execute_cycle(self) -> bool:
+        """SMART: Execute cycle - only run if needed"""
+        try:
+            instance = self.instance_manager.get_instance(self.instance_name)
+            if not instance:
+                return False
+            
+            # CRITICAL: Don't run if we've already completed successfully
+            if self.game_start_completed and self.last_successful_start:
+                time_since_success = (datetime.now() - self.last_successful_start).total_seconds()
+                if time_since_success < 300:  # Don't restart within 5 minutes
+                    return True  # Return success, no need to run
+            
+            # Only run if instance is running and we haven't started the game yet
+            if instance["status"] == "Running" and self.instance_name not in self.running_tasks:
+                # Quick check if game is already running AND stable
+                if self._is_game_already_running() and self._verify_stable_game_state():
+                    if not self.game_start_completed:
+                        self.game_start_completed = True
+                        self.last_successful_start = datetime.now()
+                        self.auto_start_status = "completed"
+                        self.log_message(f"✅ {self.instance_name} game already running and stable")
+                        
+                        # Notify module system
+                        if hasattr(self, 'module_manager') and self.module_manager:
+                            try:
+                                self.module_manager.on_autostart_completed(self.instance_name)
+                                self.log_message(f"🎯 {self.instance_name} notified module system of existing game")
+                            except Exception as e:
+                                self.log_message(f"⚠️ {self.instance_name} failed to notify module system: {e}")
+                    
+                    return True
+                
+                self.log_message(f"🎯 Auto-triggering game start for running instance: {self.instance_name}")
+                return self.start_auto_game()
+            
+            return True
+            
+        except Exception as e:
+            self.log_message(f"❌ Error in execute cycle: {e}")
+            return False
+    
+    def reset_completion_status(self):
+        """Reset completion status - call this when instance is restarted"""
+        self.game_start_completed = False
+        self.last_successful_start = None
+        self.log_message(f"🔄 Reset completion status for {self.instance_name}")
     
     def get_module_info(self) -> Dict:
         """Get module information"""
         return {
             "name": "AutoStartGame",
-            "version": "1.0.0",
-            "description": "Automatically starts the game on MEmu instances using image detection",
+            "version": "2.2.0",
+            "description": "Smart game auto-starter that prevents duplicate runs",
             "author": "BENSON v2.0",
+            "instance_name": self.instance_name,
             "dependencies": self.get_missing_dependencies(),
             "available": self.is_available(),
-            "running_instances": len(self.running_tasks),
+            "running_tasks": len(self.running_tasks),
+            "game_completed": self.game_start_completed,
+            "last_success": self.last_successful_start.isoformat() if self.last_successful_start else None,
             "templates_dir": self.templates_dir,
-            "supported_templates": {
-                "main_menu": self.MAIN_MENU_INDICATORS,
-                "game_world": self.GAME_WORLD_INDICATORS,
-                "play_buttons": self.PLAY_BUTTONS,
-                "close_buttons": self.CLOSE_BUTTONS,
-                "generic_elements": self.GENERIC_ELEMENTS
-            }
+            "smart_features": [
+                "Prevents duplicate runs",
+                "Smart game state detection",
+                "Careful dialog handling", 
+                "Quick game running checks",
+                "Strategic clicking only"
+            ]
         }
-    
-    def setup_templates_directory(self) -> str:
-        """Setup and return templates directory path"""
-        if not os.path.exists(self.templates_dir):
-            os.makedirs(self.templates_dir)
-        
-        # Create a readme file with template information
-        readme_path = os.path.join(self.templates_dir, "README.md")
-        with open(readme_path, 'w') as f:
-            f.write("""# AutoStartGame Templates
-
-Place your game template images in this directory.
-
-## Required Templates:
-
-### Main Menu Indicators:
-- game_launcher.png
-
-### Game World Indicators:
-- world.png
-- world_icon.png
-- town_icon.png
-- game_icon.png
-
-### Play Buttons:
-- game_launcher.png
-- deploy_button.png
-- play.png
-- start.png
-
-### Close Buttons:
-- close_x.png
-- close_x2.png
-- close_x3.png
-- close_x4.png
-- close_x5.png
-
-### Generic Elements:
-- deploy_button.png
-- search_button.png
-- details_button.png
-
-Templates should be PNG files with clear, distinctive game UI elements.
-""")
-        
-        return self.templates_dir
