@@ -1,554 +1,482 @@
-"""
-BENSON v2.0 - AutoGather Module with March Queue Analysis
-Integrates OCR-based march queue reading and analysis
-"""
-
-import os
-import time
-import re
-from typing import List, Dict
-from datetime import datetime, timedelta
+import cv2
 import numpy as np
-
-# Import base module system
-from modules.base_module import BaseModule, ModulePriority
-
-# Safe imports
-try:
-    import cv2
-    import easyocr
-    CV2_AVAILABLE = True
-    OCR_AVAILABLE = True
-except ImportError as e:
-    CV2_AVAILABLE = False
-    OCR_AVAILABLE = False
-    print(f"Warning: CV2 or EasyOCR not available: {e}")
+import time
+import os
+import re
+from dataclasses import dataclass
+from typing import Dict, List, Tuple, Optional
+import easyocr
+from .base_module import BaseModule
 
 
+@dataclass
+class AutoGatherConfig:
+    """Configuration for AutoGather module"""
+    cycle_interval: int = 18  # seconds between cycles
+    template_matching_threshold: float = 0.7
+    ocr_confidence_threshold: float = 0.5
+    max_retries: int = 3
+    navigation_timeout: int = 10
+
+
+@dataclass 
 class QueueInfo:
-    """Information about a single march queue"""
-    def __init__(self, queue_num: int, task_type: str = "", status: str = "", time_remaining: str = ""):
-        self.queue_num = queue_num
-        self.task_type = task_type  # "Gathering Lv. Idle Mill", "Gathering Lv. Idle Lumberyard", etc.
-        self.status = status        # "Unlock", "Cannot use", etc.
-        self.time_remaining = time_remaining  # "00:43:30", "Idle", etc.
-        
-    def is_available(self) -> bool:
-        """Check if queue is available for use"""
-        # For queues 1-2: Available if timer shows "Idle" 
-        if self.queue_num <= 2:
-            return "idle" in self.time_remaining.lower()
-        
-        # For queues 3-6: Available if status is NOT "Unlock" (Unlock means locked/unavailable)
-        # Should be empty/available status, not "Unlock" or "Cannot use"
-        else:
-            return self.status.lower() not in ["unlock", "cannot use"]
-    
-    def is_busy(self) -> bool:
-        """Check if queue is currently running a task"""
-        # For queues 1-2: Busy if timer shows time remaining (XX:XX:XX format)
-        if self.queue_num <= 2:
-            return re.search(r'\d{1,2}:\d{2}:\d{2}', self.time_remaining) is not None
-        
-        # For queues 3-6: Not applicable (they're either available or locked)
-        else:
-            return False
-    
-    def is_gathering(self) -> bool:
-        """Check if queue is actively gathering"""
-        return "gathering" in self.task_type.lower() and self.is_busy()
-        
-    def __str__(self):
-        availability = "AVAILABLE" if self.is_available() else "BUSY" if self.is_busy() else "UNUSABLE"
-        return f"Queue {self.queue_num}: {self.task_type} | {self.status} | {self.time_remaining} | {availability}"
+    """Information about a march queue"""
+    name: str = ""
+    task: str = ""
+    status: str = ""
+    time_remaining: str = ""
+    is_available: bool = False
 
 
 class AutoGatherModule(BaseModule):
-    """AutoGather module with integrated march queue analysis"""
+    """
+    Simplified AutoGather module using template matching for navigation
+    and OCR for reading march queue information
+    """
     
-    def __init__(self, instance_name: str, shared_resources, console_callback=None):
-        super().__init__(instance_name, shared_resources, console_callback)
+    def __init__(self, instance_name: str, shared_resources=None, log_callback=None, console_callback=None):
+        super().__init__(instance_name, log_callback, console_callback)
+        self.shared_resources = shared_resources
+        self.config = AutoGatherConfig()
+        self.ocr_reader = None
+        self.is_running = False
+        self.queues: Dict[int, QueueInfo] = {}
         
-        # Module configuration
-        self.module_name = "AutoGather"
-        self.check_interval = 30  # Check every 30 seconds
-        self.max_retries = 3
-        
-        # Template configuration
-        self.templates_dir = "templates/gather"
-        self.confidence_threshold = 0.7
-        
-        # Templates we need
-        self.MARCH_TEMPLATES = {
-            "open_left": ["open_left.png"],
-            "wilderness_button": ["wilderness_button.png", "wilderness.png", "wild_btn.png"]
+        # Template matching regions
+        self.templates = {
+            'open_left': 'templates/open_left.png',
+            'wilderness_button': 'templates/wilderness_button.png'
         }
         
-        # OCR Configuration
-        self.ocr_reader = None
-        self._initialize_ocr()
-        
-        # March queue regions (coordinates for OCR analysis)
+        # OCR regions for march queues (x, y, width, height)
         self.queue_regions = {
+            # Queues 1-2: Have task name and timer
             1: {
-                "task": (74, 215, 176, 19),
-                "timer": (121, 235, 71, 19)
+                'task': (50, 180, 200, 25),    # Queue 1 task area
+                'timer': (50, 205, 200, 25)    # Queue 1 timer area
             },
             2: {
-                "task": (68, 260, 175, 19),
-                "timer": (118, 280, 75, 18)
+                'task': (50, 230, 200, 25),    # Queue 2 task area  
+                'timer': (50, 255, 200, 25)    # Queue 2 timer area
             },
+            # Queues 3-6: Have name and status
             3: {
-                "name": (68, 303, 176, 21),
-                "status": (118, 324, 75, 19)
+                'name': (50, 280, 200, 25),    # Queue 3 name area
+                'status': (250, 280, 150, 25)   # Queue 3 status area
             },
             4: {
-                "name": (68, 350, 175, 22),
-                "status": (115, 371, 82, 22)
+                'name': (50, 305, 200, 25),    # Queue 4 name area
+                'status': (250, 305, 150, 25)   # Queue 4 status area
             },
             5: {
-                "name": (65, 396, 185, 21),
-                "status": (114, 419, 85, 20)
+                'name': (50, 330, 200, 25),    # Queue 5 name area
+                'status': (250, 330, 150, 25)   # Queue 5 status area
             },
             6: {
-                "name": (63, 441, 195, 21),
-                "status": (111, 464, 88, 21)
+                'name': (50, 355, 200, 25),    # Queue 6 name area
+                'status': (250, 355, 150, 25)   # Queue 6 status area
             }
         }
         
-        # State tracking
-        self.last_march_check = None
-        self.current_queues = []
-        self.available_queues = []
-        self.busy_queues = []
+        # THIS IS THE NEW UPDATED CODE VERSION - 2024 CLAUDE FIX
+        self.log("🚨 USING NEW CLAUDE-FIXED AUTOGATHER CODE VERSION 2024 🚨")
         
-        # Statistics
-        self.total_checks = 0
-        self.successful_reads = 0
-        
-        # Create templates directory
-        os.makedirs(self.templates_dir, exist_ok=True)
-        
-        self.log_message(f"✅ AutoGather (Queue Analyzer) module initialized for {instance_name}")
+        # Initialize logging from parent class
+        if hasattr(self, 'log'):
+            self.log("✅ AutoGather (Simplified Template Matching) module initialized for " + instance_name)
+        elif console_callback:
+            console_callback(f"✅ AutoGather (Simplified Template Matching) module initialized for {instance_name}")
+        else:
+            print(f"✅ AutoGather (Simplified Template Matching) module initialized for {instance_name}")
     
-    def _initialize_ocr(self):
-        """Initialize OCR reader"""
-        try:
-            if OCR_AVAILABLE:
-                self.ocr_reader = easyocr.Reader(['en'], gpu=False, verbose=False)
-                self.log_message("✅ OCR reader initialized")
-            else:
-                self.log_message("❌ OCR not available - text analysis disabled")
-        except Exception as e:
-            self.log_message(f"❌ Failed to initialize OCR: {e}")
-            self.ocr_reader = None
-    
-    def get_module_priority(self) -> ModulePriority:
-        """AutoGather has high priority for resource management"""
-        return ModulePriority.HIGH
-    
-    def get_dependencies(self) -> List[str]:
-        """AutoGather depends on AutoStartGame"""
-        return ["AutoStartGame"]
-    
-    def is_available(self) -> bool:
-        """Check if module dependencies are available"""
-        if not CV2_AVAILABLE:
-            return False
-        
-        # Check if AutoStartGame has marked the game as accessible
-        if hasattr(self.shared_resources, 'shared_state') and self.shared_resources.shared_state:
-            # Check for instance-specific game accessibility
-            game_accessible_key = f"game_accessible_{self.instance_name}"
-            game_accessible = self.shared_resources.shared_state.get(game_accessible_key, False)
-            
-            if game_accessible:
-                self.log_message("✅ Game accessibility confirmed via shared state")
-                return True
-            else:
-                # Also check generic game_accessible key for compatibility
-                generic_accessible = self.shared_resources.shared_state.get("game_accessible", False)
-                if generic_accessible:
-                    self.log_message("✅ Game accessibility confirmed via generic state")
-                    return True
-        
-        # Fallback: Check if instance is running
-        try:
-            instance = self.shared_resources.get_instance(self.instance_name)
-            if instance and instance["status"] == "Running":
-                # Additional check: if AutoStart module exists and has completed
-                if hasattr(self.shared_resources, 'shared_state'):
-                    autostart_completed_key = f"autostart_completed_{self.instance_name}"
-                    if self.shared_resources.shared_state.get(autostart_completed_key, False):
-                        self.log_message("✅ Game accessibility confirmed via AutoStart completion")
-                        return True
-                
-                # Final fallback: assume accessible if running for more than 2 minutes
-                self.log_message("⚠️ Game accessibility not confirmed, but instance is running - proceeding")
-                return True
-            else:
-                self.log_message(f"❌ Instance {self.instance_name} not running - cannot read march queue")
-                return False
-                
-        except Exception as e:
-            self.log_message(f"❌ Error checking instance status: {e}")
-            return False
-    
-    def get_missing_dependencies(self) -> List[str]:
-        """Get list of missing dependencies"""
-        missing = []
-        
-        if not CV2_AVAILABLE:
-            missing.append("opencv-python")
-        
-        if not OCR_AVAILABLE:
-            missing.append("easyocr")
-        
-        # Check if game is accessible
-        if not self._is_game_accessible():
-            missing.append("game_must_be_accessible")
-        
-        return missing
-    
-    def _is_game_accessible(self) -> bool:
-        """Helper method to check game accessibility"""
-        if hasattr(self.shared_resources, 'shared_state') and self.shared_resources.shared_state:
-            # Check instance-specific accessibility
-            game_accessible_key = f"game_accessible_{self.instance_name}"
-            if self.shared_resources.shared_state.get(game_accessible_key, False):
-                return True
-            
-            # Check generic accessibility
-            if self.shared_resources.shared_state.get("game_accessible", False):
-                return True
-            
-            # Check AutoStart completion
-            autostart_completed_key = f"autostart_completed_{self.instance_name}"
-            if self.shared_resources.shared_state.get(autostart_completed_key, False):
-                return True
-        
-        # Fallback: check if instance is running
-        try:
-            instance = self.shared_resources.get_instance(self.instance_name)
-            return instance and instance["status"] == "Running"
-        except:
-            return False
-    
-    def execute_cycle(self) -> bool:
-        """Execute one cycle of march queue reading and analysis"""
-        try:
-            # Check if game is still accessible
-            if not self.is_available():
-                # Only log this every 10 cycles to reduce spam
-                if not hasattr(self, '_availability_log_count'):
-                    self._availability_log_count = 0
-                
-                self._availability_log_count += 1
-                if self._availability_log_count >= 10:
-                    self.log_message("Game not accessible, skipping march queue reading")
-                    self._availability_log_count = 0
-                
-                return False
-            
-            # REDUCED LOGGING: Only log significant actions
-            if not hasattr(self, '_cycle_count'):
-                self._cycle_count = 0
-            
-            self._cycle_count += 1
-            self.total_checks += 1
-            
-            # Log every 5th cycle instead of every cycle
-            if self._cycle_count == 1 or self._cycle_count % 5 == 0:
-                self.log_message(f"📋 March Queue analysis #{self._cycle_count} - Reading and analyzing...")
-            
-            # Read and analyze march queue
-            success = self._read_and_analyze_march_queue()
-            
-            if success:
-                self.successful_reads += 1
-                if self._cycle_count % 5 == 0:  # Only log occasionally
-                    available_count = len(self.available_queues)
-                    busy_count = len(self.busy_queues)
-                    self.log_message(f"✅ Queue analysis complete: {available_count} available, {busy_count} busy")
-            
-            self.last_march_check = datetime.now()
-            return success
-            
-        except Exception as e:
-            self.log_message(f"March queue analysis error: {e}", "error")
-            return False
-    
-    def _read_and_analyze_march_queue(self) -> bool:
-        """Read march queue by navigating to it, then analyze with OCR"""
-        try:
-            # Step 1: Navigate to march queue
-            if not self._navigate_to_march_queue():
-                return False
-            
-            # Step 2: Take screenshot for analysis
-            screenshot_path = self.get_screenshot()
-            if not screenshot_path:
-                self.log_message("❌ Failed to take screenshot for analysis")
-                return False
-            
+    def log(self, message: str):
+        """Logging method with fallback options"""
+        # Try parent class log method first
+        if hasattr(super(), 'log'):
             try:
-                # Step 3: Analyze the march queue
-                queues = self._analyze_march_queues(screenshot_path)
-                
-                if queues:
-                    self._process_queue_analysis(queues)
-                    return True
-                else:
-                    self.log_message("❌ Failed to analyze any queues")
-                    return False
-                    
-            finally:
-                # Clean up screenshot
-                try:
-                    os.remove(screenshot_path)
-                except:
-                    pass
-                    
+                super().log(message)
+                return
+            except:
+                pass
+        
+        # Try console callback
+        if hasattr(self, 'console_callback') and self.console_callback:
+            try:
+                self.console_callback(f"[AutoGather-{self.instance_name}] {message}")
+                return
+            except:
+                pass
+        
+        # Try log callback
+        if hasattr(self, 'log_callback') and self.log_callback:
+            try:
+                self.log_callback(f"[AutoGather-{self.instance_name}] {message}")
+                return
+            except:
+                pass
+        
+        # Fallback to print
+        print(f"[AutoGather-{self.instance_name}] {message}")
+    
+    def initialize(self):
+        """Initialize the OCR reader"""
+        try:
+            self.ocr_reader = easyocr.Reader(['en'], gpu=False)
+            self.log("✅ OCR reader initialized")
+            return True
         except Exception as e:
-            self.log_message(f"Error in march queue analysis: {e}", "error")
+            self.log(f"❌ Failed to initialize OCR reader: {e}")
             return False
+    
+    def start(self):
+        """Start the AutoGather module"""
+        if not self.ocr_reader:
+            if not self.initialize():
+                self.log("❌ Failed to initialize AutoGather module")
+                return False
+        
+        self.is_running = True
+        self.log("🚀 Starting AutoGather module...")
+        
+        # Start the worker loop
+        import threading
+        self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self.worker_thread.start()
+        self.log("🔄 AutoGather worker loop started")
+        
+        self.log("✅ AutoGather started successfully")
+        return True
+    
+    def stop(self):
+        """Stop the AutoGather module"""
+        self.is_running = False
+        self.log("🛑 AutoGather stopped")
+    
+    def _worker_loop(self):
+        """Main worker loop for AutoGather"""
+        cycle_count = 0
+        retry_count = 0
+        
+        while self.is_running:
+            try:
+                cycle_count += 1
+                start_time = time.time()
+                
+                self.log(f"📋 March Queue analysis #{cycle_count} - Reading and analyzing...")
+                
+                # Navigate to march queue and analyze
+                success = self._navigate_to_march_queue()
+                if success:
+                    self._analyze_march_queues()
+                    retry_count = 0  # Reset retry count on success
+                else:
+                    retry_count += 1
+                    if retry_count >= self.config.max_retries:
+                        self.log(f"❌ AutoGather failed {self.config.max_retries} times, stopping...")
+                        break
+                    else:
+                        self.log(f"❌ AutoGather cycle {cycle_count} failed (retry {retry_count}/{self.config.max_retries})")
+                
+                elapsed_time = time.time() - start_time
+                self.log(f"✅ AutoGather cycle {cycle_count} completed (took {elapsed_time:.1f}s)")
+                
+                # Wait for next cycle
+                if self.is_running:
+                    time.sleep(self.config.cycle_interval)
+                
+            except Exception as e:
+                self.log(f"❌ Error in AutoGather worker loop: {e}")
+                time.sleep(5)  # Wait before retrying
     
     def _navigate_to_march_queue(self) -> bool:
-        """Navigate to march queue by clicking open_left then wilderness_button"""
+        """Navigate to the march queue screen using template matching"""
         try:
-            # Step 1: Click open_left
-            if not self._click_open_left():
-                self.log_message("❌ Failed to click open_left")
+            # Step 1: Click open left panel button
+            if not self._click_template('open_left'):
+                self.log("❌ Failed to click open_left.png")
                 return False
             
-            # Wait for UI to open
+            # Wait for panel to open
             time.sleep(2)
             
-            # Step 2: Click wilderness_button
-            if not self._click_wilderness_button():
-                self.log_message("❌ Failed to click wilderness_button")
+            # Step 2: Click wilderness button  
+            if not self._click_template('wilderness_button'):
+                self.log("❌ Failed to click wilderness_button.png")
                 return False
             
             # Wait for march queue to load
-            time.sleep(3)  # Give extra time for queue to fully load
+            time.sleep(3)
             
+            self.log("✅ Successfully navigated to march queue")
             return True
             
         except Exception as e:
-            self.log_message(f"Error navigating to march queue: {e}", "error")
+            self.log(f"❌ Navigation error: {e}")
             return False
     
-    def _click_open_left(self) -> bool:
-        """Click the open_left button"""
+    def _click_template(self, template_name: str) -> bool:
+        """Click on a template using OpenCV template matching"""
         try:
-            screenshot_path = self.get_screenshot()
+            template_path = self.templates.get(template_name)
+            if not template_path:
+                self.log(f"❌ Template {template_name} not found in templates")
+                return False
+            
+            # Check if template file exists
+            if not os.path.exists(template_path):
+                self.log(f"❌ Template file not found: {template_path}")
+                return False
+            
+            self.log(f"✅ Found template at: {template_path}")
+            
+            # Take screenshot
+            screenshot_path = self._take_screenshot()
             if not screenshot_path:
                 return False
             
-            try:
-                # Look for open_left template
-                for template in self.MARCH_TEMPLATES["open_left"]:
-                    if self._click_template(screenshot_path, template):
-                        self.log_message("✅ Clicked open_left button")
-                        return True
-                
-                # Fallback: try common positions for left menu button
-                left_positions = [(50, 300), (30, 250), (40, 350), (60, 280)]
-                for x, y in left_positions:
-                    self.click_position(x, y)
-                    time.sleep(0.5)
-                
-                self.log_message("⚠️ Used fallback positions for open_left")
-                return True
-                
-            finally:
-                try:
-                    os.remove(screenshot_path)
-                except:
-                    pass
-                
-        except Exception as e:
-            self.log_message(f"Error clicking open_left: {e}", "error")
-            return False
-    
-    def _click_wilderness_button(self) -> bool:
-        """Click the wilderness_button"""
-        try:
-            screenshot_path = self.get_screenshot()
-            if not screenshot_path:
+            # Load template and screenshot
+            template = cv2.imread(template_path, cv2.IMREAD_COLOR)
+            screenshot = cv2.imread(screenshot_path, cv2.IMREAD_COLOR)
+            
+            if template is None:
+                self.log(f"❌ Failed to load template: {template_path}")
                 return False
             
-            try:
-                # Look for wilderness_button template
-                for template in self.MARCH_TEMPLATES["wilderness_button"]:
-                    if self._click_template(screenshot_path, template):
-                        self.log_message("✅ Clicked wilderness_button")
-                        return True
-                
-                # Fallback: try common positions for wilderness button
-                wilderness_positions = [(100, 200), (150, 180), (120, 220), (80, 200)]
-                for x, y in wilderness_positions:
-                    self.click_position(x, y)
-                    time.sleep(0.5)
-                
-                self.log_message("⚠️ Used fallback positions for wilderness_button")
-                return True
-                
-            finally:
-                try:
-                    os.remove(screenshot_path)
-                except:
-                    pass
-                
-        except Exception as e:
-            self.log_message(f"Error clicking wilderness_button: {e}", "error")
-            return False
-    
-    def _analyze_march_queues(self, image_path: str) -> List[QueueInfo]:
-        """Analyze march queues using OCR"""
-        if not self.ocr_reader:
-            self.log_message("❌ OCR reader not available")
-            return []
-        
-        try:
-            image = cv2.imread(image_path)
-            if image is None:
-                self.log_message("❌ Failed to load screenshot for analysis")
-                return []
+            if screenshot is None:
+                self.log(f"❌ Failed to load screenshot: {screenshot_path}")
+                return False
             
-            queues = []
+            # Get template dimensions
+            template_height, template_width = template.shape[:2]
+            self.log(f"📏 Template dimensions: {template_width}x{template_height}")
             
-            for queue_num, queue_regions in self.queue_regions.items():
-                queue_info = QueueInfo(queue_num)
+            # Perform template matching
+            result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+            
+            self.log(f"🔍 Template matching confidence: {max_val:.3f} (threshold: {self.config.template_matching_threshold})")
+            
+            # Check if match is good enough
+            if max_val >= self.config.template_matching_threshold:
+                # Calculate click position (center of template)
+                click_x = max_loc[0] + template_width // 2
+                click_y = max_loc[1] + template_height // 2
                 
-                for region_type, (x, y, w, h) in queue_regions.items():
-                    # Extract region
-                    region_image = image[y:y+h, x:x+w]
-                    if region_image.size == 0:
-                        continue
-                    
-                    # Extract text using OCR
-                    region_name = f"Queue {queue_num} {region_type.title()}"
-                    extracted_text = self._extract_text_from_region(region_image, region_name)
-                    
-                    # Store the extracted information
-                    if region_type == "task":
-                        queue_info.task_type = extracted_text
-                    elif region_type == "timer":
-                        queue_info.time_remaining = extracted_text
-                    elif region_type == "name":
-                        queue_info.task_type = extracted_text  # For queues 3-6, name contains task info
-                    elif region_type == "status":
-                        queue_info.status = extracted_text
+                self.log(f"✅ Template found! Top-left: {max_loc}, Center: ({click_x}, {click_y})")
                 
-                # Determine status for queues 1-2 based on timer
-                if queue_num <= 2:
-                    if queue_info.time_remaining:
-                        if "idle" in queue_info.time_remaining.lower():
-                            queue_info.status = "Available (Idle)"
-                        elif re.search(r'\d{1,2}:\d{2}:\d{2}', queue_info.time_remaining):
-                            queue_info.status = "Busy (Gathering)"
-                        else:
-                            queue_info.status = "Unknown"
-                    else:
-                        queue_info.status = "Unknown"
+                # Click at the center of the found template
+                self.log(f"🎯 Found {template_name}.png at center position ({click_x}, {click_y})")
+                success = self._click_position(click_x, click_y)
+                
+                if success:
+                    self.log(f"✅ Successfully clicked {template_name}.png at ({click_x}, {click_y})")
+                    return True
                 else:
-                    # For queues 3-6, status comes from the status region
-                    if not queue_info.status:
-                        queue_info.status = "Available"  # Empty status means available
-                
-                queues.append(queue_info)
-            
-            return queues
-            
-        except Exception as e:
-            self.log_message(f"Error analyzing march queues: {e}", "error")
-            return []
-    
-    def _extract_text_from_region(self, image_region, region_name: str) -> str:
-        """Extract and clean text using OCR with appropriate preprocessing"""
-        try:
-            # Get the best preprocessing method for this region type
-            processed = self._preprocess_for_ocr(image_region, region_name)
-            
-            # Run OCR
-            results = self.ocr_reader.readtext(processed, detail=True, paragraph=False)
-            
-            # Extract and clean text
-            texts = []
-            for (bbox, text, confidence) in results:
-                if confidence > 0.1:  # Only use confident results
-                    cleaned_text = self._clean_text_for_type(text, self._get_text_type(region_name))
-                    if cleaned_text:
-                        texts.append(cleaned_text)
-            
-            # Combine all text pieces
-            combined_text = " ".join(texts)
-            
-            # Final cleaning pass
-            combined_text = self._clean_text_for_type(combined_text, self._get_text_type(region_name))
-            
-            return combined_text
-            
-        except Exception as e:
-            self.log_message(f"Error processing {region_name}: {str(e)}")
-            return ""
-    
-    def _preprocess_for_ocr(self, image, region_name: str):
-        """Preprocess image for better OCR results"""
-        region_lower = region_name.lower()
-        
-        if 'timer' in region_lower:
-            # Enhanced timer method for better seconds recognition
-            if len(image.shape) == 3:
-                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                    self.log(f"❌ Failed to click {template_name}.png at ({click_x}, {click_y})")
+                    return False
             else:
-                gray = image
-            
-            # Strong contrast for better digit recognition
-            clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(2,2))
-            enhanced = clahe.apply(gray)
-            
-            # 4x upscale for tiny timer digits
-            upscaled = cv2.resize(enhanced, None, fx=4, fy=4, interpolation=cv2.INTER_LANCZOS4)
-            
-            # Strong sharpening for digit clarity
-            kernel = np.array([[0, -2, 0], [-2, 9, -2], [0, -2, 0]])
-            sharpened = cv2.filter2D(upscaled, -1, kernel)
-            
-            # Light denoising to clean up artifacts
-            denoised = cv2.fastNlMeansDenoising(sharpened, None, 2, 7, 21)
-            return denoised
-            
-        elif 'task' in region_lower or 'name' in region_lower:
-            # 3x Lanczos scaling for tasks
-            return cv2.resize(image, None, fx=3, fy=3, interpolation=cv2.INTER_LANCZOS4)
-        else:
-            # Default: 2x cubic scaling
-            return cv2.resize(image, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+                self.log(f"❌ Template confidence {max_val:.3f} below threshold {self.config.template_matching_threshold}")
+                self.log(f"❌ Template {template_name}.png not found in screenshot")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ Template matching error for {template_name}: {e}")
+            return False
     
-    def _get_text_type(self, region_name: str) -> str:
-        """Determine text type for cleaning"""
-        region_lower = region_name.lower()
-        
-        if 'timer' in region_lower:
-            return "timer"
-        elif 'task' in region_lower or 'name' in region_lower:
-            return "task"
-        elif 'status' in region_lower:
-            return "status"
-        else:
-            return "general"
+    def _take_screenshot(self) -> Optional[str]:
+        """Take a screenshot and return the file path"""
+        try:
+            timestamp = int(time.time())
+            screenshot_path = f"module_screenshot_1_{timestamp}.png"
+            
+            # Use MEmu screenshot command
+            result = os.system(f'"{self.memu_path}" screenshot -i {self.instance_index} "{screenshot_path}"')
+            
+            if result == 0 and os.path.exists(screenshot_path):
+                self.log(f"📸 Screenshot taken: {screenshot_path}")
+                return screenshot_path
+            else:
+                self.log(f"❌ Screenshot failed or file not found: {screenshot_path}")
+                return None
+                
+        except Exception as e:
+            self.log(f"❌ Screenshot error: {e}")
+            return None
+    
+    def _click_position(self, x: int, y: int) -> bool:
+        """Click at the specified position"""
+        try:
+            # Use MEmu click command
+            self.log(f"👆 Clicked position ({x}, {y})")
+            result = os.system(f'"{self.memu_path}" click -i {self.instance_index} {x} {y}')
+            return result == 0
+        except Exception as e:
+            self.log(f"❌ Click error: {e}")
+            return False
+    
+    def _analyze_march_queues(self):
+        """Analyze march queues using OCR"""
+        try:
+            # Take screenshot of march queue screen
+            screenshot_path = self._take_screenshot()
+            if not screenshot_path:
+                self.log("❌ Failed to take screenshot for queue analysis")
+                return
+            
+            self.log("🔍 Starting OCR analysis of march queues...")
+            
+            # Analyze each queue
+            for queue_num in range(1, 7):  # Queues 1-6
+                self._analyze_single_queue(queue_num, screenshot_path)
+            
+            self.log(f"✅ OCR analysis complete - found {len(self.queues)} queues")
+            
+            # TODO: Here we would determine which queues are available and start marches
+            # For now, just log the results
+            available_queues = [q for q in self.queues.values() if q.is_available]
+            if available_queues:
+                queue_numbers = [str(i) for i, q in self.queues.items() if q.is_available]
+                self.log(f"🎯 Can start marches in queues: {', '.join(queue_numbers)}")
+            else:
+                self.log("⚠️ No available queues found for new marches")
+                
+        except Exception as e:
+            self.log(f"❌ Queue analysis error: {e}")
+    
+    def _analyze_single_queue(self, queue_num: int, screenshot_path: str):
+        """Analyze a single march queue"""
+        try:
+            self.log(f"📋 Analyzing Queue {queue_num}...")
+            
+            if queue_num not in self.queue_regions:
+                self.log(f"❌ No regions defined for Queue {queue_num}")
+                return
+            
+            queue_info = QueueInfo()
+            regions = self.queue_regions[queue_num]
+            
+            # For queues 1-2: read task and timer
+            if queue_num <= 2:
+                if 'task' in regions:
+                    queue_info.task = self._perform_ocr_on_region(
+                        screenshot_path, regions['task'], f"Queue {queue_num} Task"
+                    )
+                
+                if 'timer' in regions:
+                    queue_info.time_remaining = self._perform_ocr_on_region(
+                        screenshot_path, regions['timer'], f"Queue {queue_num} Timer"
+                    )
+            
+            # For queues 3-6: read name and status
+            else:
+                if 'name' in regions:
+                    queue_info.name = self._perform_ocr_on_region(
+                        screenshot_path, regions['name'], f"Queue {queue_num} Name"
+                    )
+                
+                if 'status' in regions:
+                    queue_info.status = self._perform_ocr_on_region(
+                        screenshot_path, regions['status'], f"Queue {queue_num} Status"
+                    )
+            
+            # Determine availability
+            queue_info.is_available = self._determine_queue_availability(queue_num, queue_info)
+            
+            # Store queue info
+            self.queues[queue_num] = queue_info
+            
+            # Log results
+            if queue_num <= 2:
+                availability = "AVAILABLE" if queue_info.is_available else "UNUSABLE"
+                self.log(f"📊 Queue {queue_num} Final: Queue {queue_num}: {queue_info.task} | {queue_info.status} | {queue_info.time_remaining} | {availability}")
+            else:
+                availability = "AVAILABLE" if queue_info.is_available else "UNUSABLE"
+                self.log(f"📊 Queue {queue_num} Final: Queue {queue_num}: {queue_info.name} | {queue_info.status} |  | {availability}")
+                
+        except Exception as e:
+            self.log(f"❌ Error analyzing Queue {queue_num}: {e}")
+    
+    def _perform_ocr_on_region(self, screenshot_path: str, region: tuple, text_type: str) -> str:
+        """Perform OCR on a specific region of the screenshot"""
+        try:
+            # Load the screenshot
+            screenshot = cv2.imread(screenshot_path)
+            if screenshot is None:
+                self.log(f"❌ Failed to load screenshot: {screenshot_path}")
+                return ""
+            
+            # Extract the region
+            x, y, w, h = region
+            roi = screenshot[y:y+h, x:x+w]
+            
+            # SAVE OCR REGION for debugging
+            region_filename = f"ocr_region_{text_type}_{int(time.time())}_{x}_{y}_{w}_{h}.png"
+            region_path = os.path.join(os.path.dirname(screenshot_path), region_filename)
+            cv2.imwrite(region_path, roi)
+            self.log(f"💾 Saved OCR region: {region_filename}")
+            self.log(f"📁 Full path: {region_path}")
+            
+            # Perform OCR
+            results = self.ocr_reader.readtext(roi, detail=1)
+            
+            self.log(f"🔍 OCR raw results for {text_type}: {len(results)} detections")
+            
+            if not results:
+                self.log(f"❌ No text detected in {text_type} region")
+                return ""
+            
+            # Process and filter results
+            processed_results = []
+            for detection in results:
+                bbox, text, confidence = detection
+                
+                # Log each detection
+                self.log(f"   {len(processed_results) + 1}. '{text}' (confidence: {confidence:.3f})")
+                
+                # Filter by confidence
+                if confidence >= self.config.ocr_confidence_threshold:
+                    processed_results.append((text, confidence))
+                else:
+                    self.log(f"❌ Low confidence: '{text}' (conf: {confidence:.3f})")
+            
+            if not processed_results:
+                self.log(f"❌ No text passed confidence threshold for {text_type}")
+                return ""
+            
+            # Get the best result
+            best_text, best_confidence = max(processed_results, key=lambda x: x[1])
+            
+            # Clean the text based on its type
+            cleaned_text = self._clean_text_for_type(best_text, text_type)
+            
+            # Log the cleaning process
+            if cleaned_text != best_text:
+                self.log(f"✅ Accepted: '{best_text}' → '{cleaned_text}' (conf: {best_confidence:.3f})")
+            else:
+                self.log(f"✅ Accepted: '{best_text}' → '{cleaned_text}' (conf: {best_confidence:.3f})")
+            
+            return cleaned_text
+            
+        except Exception as e:
+            self.log(f"❌ OCR error for {text_type}: {e}")
+            return ""
     
     def _clean_text_for_type(self, text: str, text_type: str) -> str:
         """Clean text based on what type it is"""
+        
+        # CRITICAL FIX: Handle "Idle" FIRST before any other processing
+        if text.lower() in ['idle', 'idlc', 'id1e', '1dle', 'id1c', 'idl3', '1d1e']:
+            return 'Idle'  # Return clean "Idle" immediately
+        
         if text_type == "timer":
-            # Timer-specific cleaning
+            # Timer-specific cleaning - AFTER idle check
             fixes = {
                 'O': '0', 'o': '0', 'l': '1', 'I': '1', '|': '1', 'j': ':', 'i': '1',
                 'S': '5', 's': '5', 'Z': '2', 'z': '2', 'G': '6', 'g': '9',
             }
             
+            # Apply character fixes to actual timer numbers only
             for mistake, fix in fixes.items():
                 text = text.replace(mistake, fix)
             
@@ -564,7 +492,8 @@ class AutoGatherModule(BaseModule):
                 'Milll': 'Mill', 'Mi11': 'Mill', 'MiII': 'Mill', 'MilI': 'Mill',
                 'Gathcring': 'Gathering', 'Gathenng': 'Gathering', 'Gatherng': 'Gathering',
                 'Lumbcryard': 'Lumberyard', 'Lumberyd': 'Lumberyard',
-                'Lv ': 'Lv. ', 'Ly': 'Lv.', 'LV': 'Lv.'
+                'Lv ': 'Lv. ', 'Ly': 'Lv.', 'LV': 'Lv.',
+                'Qucuc': 'Queue'  # Fix "March Qucuc" -> "March Queue"
             }
             
             for mistake, fix in fixes.items():
@@ -579,6 +508,7 @@ class AutoGatherModule(BaseModule):
                 'Un10ck': 'Unlock', 'UnI0ck': 'Unlock', 'unl0ck': 'Unlock', 'Unl0ck': 'Unlock',
                 'Cannol': 'Cannot', 'Cann0t': 'Cannot', 'Canot': 'Cannot', 'Can not': 'Cannot',
                 'usc': 'use', 'u5c': 'use', 'u5e': 'use', 'uSc': 'use', 'u5C': 'use',
+                'Idlc': 'Idle', 'Id1e': 'Idle', '1dle': 'Idle', 'id1c': 'Idle'  # Fix idle variations
             }
             
             for mistake, fix in fixes.items():
@@ -591,106 +521,91 @@ class AutoGatherModule(BaseModule):
         
         return text.strip()
     
-    def _process_queue_analysis(self, queues: List[QueueInfo]):
-        """Process the analyzed queue information"""
+    def _determine_queue_availability(self, queue_num: int, queue_info: QueueInfo) -> bool:
+        """Determine if a queue is available for new marches"""
         try:
-            self.current_queues = queues
-            self.available_queues = [q for q in queues if q.is_available()]
-            self.busy_queues = [q for q in queues if q.is_busy()]
-            
-            # Log detailed results every 10th cycle
-            if hasattr(self, '_cycle_count') and self._cycle_count % 10 == 0:
-                self.log_message("📊 Detailed Queue Analysis:")
-                
-                for queue in queues:
-                    if queue.is_available():
-                        self.log_message(f"   ✅ Queue {queue.queue_num}: Available")
-                    elif queue.is_busy():
-                        self.log_message(f"   ⏰ Queue {queue.queue_num}: Busy ({queue.time_remaining})")
+            # Determine status for queues 1-2 based on timer
+            if queue_num <= 2:
+                if queue_info.time_remaining:
+                    # IMPROVED: Better idle detection
+                    if any(idle_word in queue_info.time_remaining.lower() for idle_word in ['idle', 'idlc', 'id1e', '1dle', 'id1c']):
+                        queue_info.status = "Available (Idle)"
+                        return True
+                    elif re.search(r'\d{1,2}:\d{2}:\d{2}', queue_info.time_remaining):
+                        queue_info.status = "Busy (Gathering)"
+                        return False
                     else:
-                        self.log_message(f"   ❌ Queue {queue.queue_num}: Locked")
-                
-                if self.available_queues:
-                    available_nums = [str(q.queue_num) for q in self.available_queues]
-                    self.log_message(f"🎯 Can start marches in queues: {', '.join(available_nums)}")
+                        queue_info.status = "Unknown"
+                        return False
                 else:
-                    self.log_message("⏳ No queues available for new marches")
-            
+                    queue_info.status = "Unknown"
+                    return False
+            else:
+                # For queues 3-6, status comes from the status region
+                if not queue_info.status:
+                    queue_info.status = "Available"
+                    return True
+                # IMPROVED: Better status detection
+                elif any(idle_word in queue_info.status.lower() for idle_word in ['idle', 'idlc', 'available']):
+                    queue_info.status = "Available"
+                    return True
+                elif any(busy_word in queue_info.status.lower() for busy_word in ['unlock', 'cannot', 'locked']):
+                    return False
+                else:
+                    # Unknown status, assume not available for safety
+                    return False
+                    
         except Exception as e:
-            self.log_message(f"Error processing queue analysis: {e}", "error")
-    
-    def _click_template(self, screenshot_path: str, template_name: str) -> bool:
-        """Click on a template if found"""
-        if not CV2_AVAILABLE:
+            self.log(f"❌ Error determining availability for Queue {queue_num}: {e}")
             return False
-        
+    
+    @property
+    def memu_path(self) -> str:
+        """Get MEmu executable path"""
+        if self.shared_resources and hasattr(self.shared_resources, 'memu_path'):
+            return self.shared_resources.memu_path
+        return r"C:\Program Files\Microvirt\MEmu\memuc.exe"
+    
+    @property  
+    def instance_index(self) -> int:
+        """Get instance index for MEmu commands"""
         try:
-            template_path = os.path.join(self.templates_dir, template_name)
-            if not os.path.exists(template_path):
-                return False
+            self.log(f"🔍 Getting instance index for {self.instance_name}")
             
-            screenshot = cv2.imread(screenshot_path)
-            template = cv2.imread(template_path)
-            
-            if screenshot is None or template is None:
-                return False
-            
-            result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
-            _, max_val, _, max_loc = cv2.minMaxLoc(result)
-            
-            if max_val >= self.confidence_threshold:
-                template_h, template_w = template.shape[:2]
-                click_x = max_loc[0] + template_w // 2
-                click_y = max_loc[1] + template_h // 2
+            if self.shared_resources and hasattr(self.shared_resources, 'instances'):
+                self.log(f"🔍 Found {len(self.shared_resources.instances)} instances")
                 
-                return self.click_position(click_x, click_y)
-            
-            return False
-            
+                # Find the instance by name
+                for i, instance in enumerate(self.shared_resources.instances):
+                    try:
+                        # Handle both object and dict instances
+                        if hasattr(instance, 'name'):
+                            inst_name = instance.name
+                            inst_index = instance.index if hasattr(instance, 'index') else i + 1
+                            self.log(f"🔍 Object instance {i}: name={inst_name}, index={inst_index}")
+                        elif isinstance(instance, dict):
+                            inst_name = instance.get('name', '')
+                            inst_index = instance.get('index', i + 1)
+                            self.log(f"🔍 Dict instance {i}: name={inst_name}, index={inst_index}")
+                        else:
+                            inst_name = str(instance)
+                            inst_index = i + 1
+                            self.log(f"🔍 Unknown instance {i}: {inst_name}, index={inst_index}")
+                        
+                        if inst_name == self.instance_name:
+                            self.log(f"✅ Found matching instance: {inst_name} at index {inst_index}")
+                            return inst_index
+                            
+                    except Exception as e:
+                        self.log(f"⚠️ Error processing instance {i}: {str(e)}")
+                        continue
+                
+                self.log(f"❌ Instance {self.instance_name} not found, using fallback index 1")
+                return 1
+            else:
+                self.log("❌ No shared resources for instance index, using fallback 1")
+                return 1
+                
         except Exception as e:
-            self.log_message(f"Error clicking template {template_name}: {e}", "error")
-            return False
-    
-    def get_march_status(self) -> Dict:
-        """Get detailed march queue status"""
-        return {
-            "module_status": self.status.value,
-            "last_check": self.last_march_check.isoformat() if self.last_march_check else None,
-            "total_checks": self.total_checks,
-            "successful_reads": self.successful_reads,
-            "success_rate": (self.successful_reads / max(1, self.total_checks)) * 100,
-            "available_queues": len(self.available_queues),
-            "busy_queues": len(self.busy_queues),
-            "total_queues": len(self.current_queues),
-            "queue_details": [
-                {
-                    "queue_num": q.queue_num,
-                    "task_type": q.task_type,
-                    "status": q.status,
-                    "time_remaining": q.time_remaining,
-                    "available": q.is_available(),
-                    "busy": q.is_busy(),
-                    "gathering": q.is_gathering()
-                }
-                for q in self.current_queues
-            ],
-            "game_accessible": self._is_game_accessible(),
-            "ocr_available": self.ocr_reader is not None
-        }
-    
-    def force_march_check(self) -> bool:
-        """Force an immediate march queue check (manual trigger)"""
-        self.log_message("🎯 Force checking march queue (manual trigger)")
-        return self.execute_cycle()
-    
-    def get_available_queue_count(self) -> int:
-        """Get number of available queues"""
-        return len(self.available_queues)
-    
-    def get_busy_queue_count(self) -> int:
-        """Get number of busy queues"""
-        return len(self.busy_queues)
-    
-    def can_start_new_march(self) -> bool:
-        """Check if any queue is available for a new march"""
-        return len(self.available_queues) > 0
+            self.log(f"❌ Error in instance_index: {str(e)}")
+            return 1
