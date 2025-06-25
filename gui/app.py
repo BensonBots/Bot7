@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 BENSON v2.0 - FIXED Main Application
-Resolves module initialization loop and properly integrates split components
+Clean event-driven module system without constant loops
 """
 
 import tkinter as tk
@@ -205,7 +205,7 @@ class BensonApp(tk.Tk):
         return LoadingController(loading_window, status_label, dots_label, progress_canvas)
 
     def initialize_background(self):
-        """FIXED: Initialize with proper error handling and no loops"""
+        """FIXED: Initialize with clean module system - no loops"""
         def init_worker():
             try:
                 # Step 1: Create InstanceManager
@@ -224,7 +224,7 @@ class BensonApp(tk.Tk):
                 instances_count = len(self.instance_manager.get_instances())
                 print(f"[Init] {instances_count} instances loaded")
 
-                # Step 3: Initialize modules PROPERLY
+                # Step 3: Initialize FIXED modules - NO LOOPS
                 self._safe_update_status("Initializing modules...")
                 time.sleep(1.0)
 
@@ -232,18 +232,15 @@ class BensonApp(tk.Tk):
                 try:
                     from utils.module_manager import ModuleManager
                     self.module_manager = ModuleManager(self)
-                    print("[Init] ✅ Module manager created successfully")
-                    # Note: ModuleManager now initializes itself in __init__
+                    print("[Init] ✅ FIXED Module manager created successfully")
                 except Exception as e:
                     print(f"[Init] ❌ Module manager creation failed: {e}")
-                    # Continue without modules
                     self.module_manager = None
 
                 # Step 4: Setup utilities
                 self._safe_update_status("Setting up utilities...")
                 time.sleep(1.0)
 
-                # Import utilities
                 from utils.instance_operations import InstanceOperations
                 from utils.ui_manager import UIManager
                 
@@ -291,12 +288,12 @@ class BensonApp(tk.Tk):
             self.add_console_message("BENSON v2.0 started")
             self.add_console_message(f"Loaded {instances_count} MEmu instances")
             
-            # FIXED: Report module system status
+            # Module system status - clean reporting
             if self.module_manager:
                 if hasattr(self.module_manager, 'initialization_complete') and self.module_manager.initialization_complete:
                     self.add_console_message("✅ Module system initialized successfully")
                 else:
-                    self.add_console_message("⚠️ Module system initializing in background...")
+                    self.add_console_message("🔧 Module system initializing...")
             else:
                 self.add_console_message("⚠️ Module system not available")
             
@@ -443,13 +440,13 @@ class BensonApp(tk.Tk):
             print("[Console] Adding final console messages...")
             self.add_console_message(f"✅ BENSON v2.0 ready with {instances_count} instances")
             
-            # FIXED: Module system status update
+            # FIXED: Module system status update - no auto-triggers
             if self.module_manager:
                 if hasattr(self.module_manager, 'initialization_complete'):
                     if self.module_manager.initialization_complete:
-                        self.add_console_message("🔧 Module system ready for automation")
+                        self.add_console_message("🔧 Module system ready - start instances to activate")
                     else:
-                        self.add_console_message("🔧 Module system initializing...")
+                        self.add_console_message("🔧 Module system finalizing...")
             
             # Force console update
             self.console_text.update_idletasks()
@@ -508,8 +505,8 @@ class BensonApp(tk.Tk):
             
             print("[BensonApp] ✅ Main window is now visible and ready!")
             
-            # FIXED: NO automatic auto-startup trigger here anymore
-            # The module manager handles this automatically in its initialization
+            # REMOVED: No automatic auto-startup triggers
+            # The module manager is event-driven now
             
         except Exception as e:
             print(f"[CloseLoading] Error: {e}")
@@ -631,13 +628,14 @@ class BensonApp(tk.Tk):
         except Exception as e:
             print(f"[LoadInstances] Error: {e}")
 
-    # FIXED: Instance Operations with Auto-startup Integration
+    # FIXED: Instance Operations with Clean Module Integration
     def start_instance(self, name):
-        """Start instance with optimization and auto-startup integration"""
+        """SIMPLIFIED: Start instance with clean module integration"""
         def start_with_optimization():
             try:
                 self.add_console_message(f"🔧 Auto-optimizing {name} before start...")
-                # FIXED: Use the correct method name
+                
+                # Optimize instance settings
                 success = self.instance_manager.optimize_instance_settings(name)
                 if success:
                     self.add_console_message(f"✅ {name} optimized successfully")
@@ -650,28 +648,47 @@ class BensonApp(tk.Tk):
                 if start_success:
                     self.add_console_message(f"✅ Started: {name}")
                     
-                    # FIXED: Trigger module auto-startup only if module manager exists and is ready
+                    # CLEAN: Only trigger modules if system is ready - NO LOOPS
                     if (hasattr(self, 'module_manager') and self.module_manager and 
                         hasattr(self.module_manager, 'initialization_complete') and 
                         self.module_manager.initialization_complete):
                         
-                        self.add_console_message(f"🔍 Checking modules for {name}...")
-                        # Use the main thread to trigger auto-startup
+                        self.add_console_message(f"🔍 Triggering modules for {name}...")
+                        # Simple delay then trigger - NO MONITORING LOOPS
                         self.after(3000, lambda: self.module_manager.trigger_auto_startup_for_instance(name))
                     else:
                         self.add_console_message(f"ℹ️ Module system not ready for {name}")
-                    
+                        
                 else:
                     self.add_console_message(f"❌ Failed to start: {name}")
-                    
+                        
             except Exception as e:
                 self.add_console_message(f"❌ Error in start_instance: {e}")
 
         threading.Thread(target=start_with_optimization, daemon=True).start()
 
     def stop_instance(self, name):
-        """Stop instance"""
-        self.instance_ops.stop_instance(name)
+        """SIMPLIFIED: Stop instance with clean module cleanup"""
+        def stop_with_cleanup():
+            try:
+                self.add_console_message(f"🔄 Stopping instance: {name}")
+                
+                # FIRST: Clean up modules before stopping
+                if hasattr(self, 'module_manager') and self.module_manager:
+                    self.module_manager.cleanup_for_stopped_instance(name)
+                
+                # THEN: Stop the instance
+                success = self.instance_manager.stop_instance(name)
+                
+                if success:
+                    self.add_console_message(f"✅ Stopped: {name}")
+                else:
+                    self.add_console_message(f"❌ Failed to stop: {name}")
+                        
+            except Exception as e:
+                self.add_console_message(f"❌ Error stopping {name}: {e}")
+
+        threading.Thread(target=stop_with_cleanup, daemon=True).start()
 
     def delete_instance_card_with_loading(self, card):
         """Delete instance card"""
@@ -831,8 +848,9 @@ class BensonApp(tk.Tk):
         try:
             if hasattr(self, 'loading'):
                 self.loading.close()
+            # FIXED: Clean module shutdown - no more monitoring loops
             if hasattr(self, 'module_manager') and self.module_manager:
-                self.module_manager.stop_status_monitoring()
+                self.module_manager.stop_all_modules()
         except:
             pass
         super().destroy()

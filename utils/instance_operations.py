@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - FIXED Instance Operations with Auto-startup Integration
-Added proper auto-startup triggers when instances are started
+BENSON v2.0 - FIXED Instance Operations - Proper Module Integration
+Clean event-driven module triggers instead of constant monitoring
 """
 
 import tkinter as tk
@@ -10,7 +10,7 @@ import time
 
 
 class InstanceOperations:
-    """Fixed instance operations with auto-startup integration"""
+    """Fixed instance operations with clean module integration"""
 
     def __init__(self, app_ref):
         self.app = app_ref
@@ -51,7 +51,6 @@ class InstanceOperations:
             # Update scroll region
             if hasattr(self.app.ui_manager, 'update_scroll_region'):
                 self.app.ui_manager.update_scroll_region()
-                # Scroll to show new card
                 self.app.after(100, self.app.ui_manager.scroll_to_bottom)
             
             print(f"[InstanceOps] ✅ Loading card created for {name}")
@@ -62,16 +61,12 @@ class InstanceOperations:
 
         # Start creation in background
         def creation_thread():
-            """Background creation thread"""
             success = False
             error_msg = None
             
             try:
                 print(f"[InstanceOps] 🔄 Starting background creation for {name}")
-                
-                # This is the slow part - runs in background
                 success = self.app.instance_manager.create_instance_with_name(name)
-                
                 print(f"[InstanceOps] ✅ Background creation result: {success}")
                 
             except Exception as e:
@@ -87,11 +82,9 @@ class InstanceOperations:
         # Start the background thread
         thread = threading.Thread(target=creation_thread, daemon=True, name=f"Create-{name}")
         thread.start()
-        
-        print(f"[InstanceOps] 🚀 Creation thread started for {name}")
 
     def _handle_creation_completion(self, name, loading_card, success, error_msg):
-        """Handle completion with simple card addition - NO REFRESH"""
+        """Handle completion with simple card addition"""
         try:
             print(f"[InstanceOps] 🎯 Handling completion for {name}, success: {success}")
             
@@ -120,12 +113,11 @@ class InstanceOperations:
             print(f"[InstanceOps] ❌ Error handling completion: {e}")
 
     def _add_new_instance_card_simple(self, name, loading_card):
-        """Simply add the new instance card - SIMPLE VERSION"""
+        """Simply add the new instance card"""
         try:
-            print(f"[InstanceOps] 🆕 Adding new card for {name} - SIMPLE METHOD")
+            print(f"[InstanceOps] 🆕 Adding new card for {name}")
             
-            # Get fresh instance data (minimal refresh)
-            print(f"[InstanceOps] 📊 Getting fresh data for {name}")
+            # Get fresh instance data
             self.app.instance_manager.load_real_instances()
             instances = self.app.instance_manager.get_instances()
             
@@ -133,7 +125,6 @@ class InstanceOperations:
             new_instance = None
             for instance in instances:
                 instance_name = instance["name"]
-                # Check for exact match or partial match (since MEmu renames)
                 if (instance_name == name or 
                     name in instance_name or 
                     instance_name in name or
@@ -183,7 +174,7 @@ class InstanceOperations:
             # Update UI
             self._update_ui_after_simple_add(new_instance["name"])
             
-            # NEW: Refresh modules for new instance
+            # FIXED: Refresh modules for new instance
             if hasattr(self.app, 'module_manager'):
                 self.app.module_manager.refresh_modules()
             
@@ -191,46 +182,35 @@ class InstanceOperations:
             
         except Exception as e:
             print(f"[InstanceOps] ❌ Error adding new card: {e}")
-            import traceback
-            traceback.print_exc()
             if loading_card:
                 self._remove_loading_card(loading_card)
 
     def _add_highlight_animation(self, card, name):
         """Add highlight animation to new card"""
         try:
-            print(f"[InstanceOps] ✨ Adding highlight animation for {name}")
-            
             if not hasattr(card, 'main_container'):
-                print(f"[InstanceOps] ⚠️ Card has no main_container for {name}")
                 return
             
-            # Start with normal color
             original_bg = card.main_container.cget("bg")
             
-            # Animation sequence: normal -> green -> normal
             def animate_step(step=0):
                 try:
                     if not card.winfo_exists():
                         return
                     
                     if step == 0:
-                        # Fade to green
                         card.main_container.configure(bg="#00ff88")
                         card.after(400, lambda: animate_step(1))
                     elif step == 1:
-                        # Fade to lighter green
                         card.main_container.configure(bg="#33ff99")
                         card.after(200, lambda: animate_step(2))
                     elif step == 2:
-                        # Fade back to original
                         card.main_container.configure(bg=original_bg)
                         print(f"[InstanceOps] ✅ Highlight animation complete for {name}")
                     
                 except Exception as e:
                     print(f"[InstanceOps] Animation error: {e}")
             
-            # Start animation
             animate_step()
             
         except Exception as e:
@@ -239,8 +219,6 @@ class InstanceOperations:
     def _update_ui_after_simple_add(self, name):
         """Update UI after simple card addition"""
         try:
-            print(f"[InstanceOps] 🔄 Updating UI after adding {name}")
-            
             # Configure grid
             if hasattr(self.app, 'instances_container') and self.app.instance_cards:
                 self.app.instances_container.grid_columnconfigure(0, weight=1, minsize=580)
@@ -261,8 +239,6 @@ class InstanceOperations:
             
             # Force UI update
             self.app.update_idletasks()
-            
-            print(f"[InstanceOps] ✅ UI update complete for {name}")
             
         except Exception as e:
             print(f"[InstanceOps] ❌ Error updating UI: {e}")
@@ -286,18 +262,53 @@ class InstanceOperations:
         except Exception as e:
             print(f"[InstanceOps] ❌ Error removing loading card: {e}")
 
-    def _reposition_all_cards(self):
-        """Reposition all cards"""
-        try:
-            for i, card in enumerate(self.app.instance_cards):
-                if card and card.winfo_exists():
-                    row = i // 2
-                    col = i % 2
-                    card.grid(row=row, column=col, padx=4, pady=2, 
-                            sticky="e" if col == 0 else "w", 
-                            in_=self.app.instances_container)
-        except Exception as e:
-            print(f"[InstanceOps] ❌ Error repositioning cards: {e}")
+    # FIXED: Instance start operations with clean module integration
+    def start_instance(self, name):
+        """Start instance with auto-startup integration - EVENT DRIVEN"""
+        def start_thread():
+            try:
+                self.app.add_console_message(f"🔄 Starting instance: {name}")
+                
+                # Start the instance
+                success = self.app.instance_manager.start_instance(name)
+                
+                if success:
+                    self.app.after(0, lambda: self.app.add_console_message(f"✅ Started: {name}"))
+                    
+                    # FIXED: Trigger module auto-startup ONLY when instance starts
+                    # This is the ONLY place we trigger module startup - no constant monitoring
+                    if hasattr(self.app, 'module_manager') and self.app.module_manager.initialization_complete:
+                        self.app.after(0, lambda: self.app.module_manager.trigger_auto_startup_for_instance(name))
+                    else:
+                        self.app.after(0, lambda: self.app.add_console_message(f"⚠️ Module system not ready for {name}"))
+                else:
+                    self.app.after(0, lambda: self.app.add_console_message(f"❌ Failed to start: {name}"))
+                    
+            except Exception as e:
+                self.app.after(0, lambda: self.app.add_console_message(f"❌ Error starting {name}: {e}"))
+        
+        threading.Thread(target=start_thread, daemon=True).start()
+
+    def stop_instance(self, name):
+        """Stop instance - EVENT DRIVEN cleanup"""
+        def stop_thread():
+            try:
+                self.app.add_console_message(f"🔄 Stopping instance: {name}")
+                
+                # FIRST: Clean up modules before stopping instance
+                if hasattr(self.app, 'module_manager'):
+                    self.app.module_manager.cleanup_for_stopped_instance(name)
+                
+                # THEN: Stop the instance
+                success = self.app.instance_manager.stop_instance(name)
+                
+                message = f"✅ Stopped: {name}" if success else f"❌ Failed to stop: {name}"
+                self.app.after(0, lambda: self.app.add_console_message(message))
+                
+            except Exception as e:
+                self.app.after(0, lambda: self.app.add_console_message(f"❌ Error stopping {name}: {e}"))
+        
+        threading.Thread(target=stop_thread, daemon=True).start()
 
     # Delete operations
     def delete_instance_card_with_animation(self, card):
@@ -341,6 +352,11 @@ class InstanceOperations:
                 error_msg = None
                 
                 try:
+                    # FIRST: Clean up modules before deletion
+                    if hasattr(self.app, 'module_manager'):
+                        self.app.module_manager.cleanup_for_stopped_instance(card.name)
+                    
+                    # THEN: Delete the instance
                     success = self.app.instance_manager.delete_instance(card.name)
                 except Exception as e:
                     error_msg = str(e)
@@ -379,7 +395,7 @@ class InstanceOperations:
             self._reposition_all_cards()
             self._update_counter()
             
-            # NEW: Refresh modules after deletion
+            # FIXED: Refresh modules after deletion
             if hasattr(self.app, 'module_manager'):
                 self.app.module_manager.refresh_modules()
             
@@ -399,6 +415,19 @@ class InstanceOperations:
         except:
             pass
 
+    def _reposition_all_cards(self):
+        """Reposition all cards"""
+        try:
+            for i, card in enumerate(self.app.instance_cards):
+                if card and card.winfo_exists():
+                    row = i // 2
+                    col = i % 2
+                    card.grid(row=row, column=col, padx=4, pady=2, 
+                            sticky="e" if col == 0 else "w", 
+                            in_=self.app.instances_container)
+        except Exception as e:
+            print(f"[InstanceOps] ❌ Error repositioning cards: {e}")
+
     def _update_counter(self):
         """Update instance counter"""
         try:
@@ -407,43 +436,6 @@ class InstanceOperations:
                 self.app.instances_header.configure(text=f"Instances ({count})")
         except Exception as e:
             print(f"[InstanceOps] ❌ Error updating counter: {e}")
-
-    # FIXED: Instance start/stop operations with auto-startup integration
-    def start_instance(self, name):
-        """Start instance with auto-startup integration"""
-        def start_thread():
-            try:
-                self.app.add_console_message(f"🔄 Starting instance: {name}")
-                success = self.app.instance_manager.start_instance(name)
-                
-                if success:
-                    self.app.after(0, lambda: self.app.add_console_message(f"✅ Started: {name}"))
-                    
-                    # NEW: Trigger auto-startup check after instance starts
-                    if hasattr(self.app, 'module_manager'):
-                        self.app.add_console_message(f"🔍 Checking auto-startup for {name}...")
-                        # Delay to ensure instance is fully started
-                        self.app.after(0, lambda: self.app.module_manager.trigger_auto_startup_for_instance(name))
-                else:
-                    self.app.after(0, lambda: self.app.add_console_message(f"❌ Failed to start: {name}"))
-                    
-            except Exception as e:
-                self.app.after(0, lambda: self.app.add_console_message(f"❌ Error starting {name}: {e}"))
-        
-        threading.Thread(target=start_thread, daemon=True).start()
-
-    def stop_instance(self, name):
-        """Stop instance (non-blocking)"""
-        def stop_thread():
-            try:
-                self.app.add_console_message(f"🔄 Stopping instance: {name}")
-                success = self.app.instance_manager.stop_instance(name)
-                message = f"✅ Stopped: {name}" if success else f"❌ Failed to stop: {name}"
-                self.app.after(0, lambda: self.app.add_console_message(message))
-            except Exception as e:
-                self.app.after(0, lambda: self.app.add_console_message(f"❌ Error stopping {name}: {e}"))
-        
-        threading.Thread(target=stop_thread, daemon=True).start()
 
     def refresh_instances(self):
         """Refresh instances with module refresh"""
@@ -454,7 +446,7 @@ class InstanceOperations:
                 self.app.instance_manager.refresh_instances()
                 self.app.after(0, lambda: self.app.load_instances())
                 
-                # NEW: Refresh modules after instance refresh
+                # FIXED: Refresh modules after instance refresh
                 if hasattr(self.app, 'module_manager'):
                     self.app.after(0, lambda: self.app.module_manager.refresh_modules())
                 
