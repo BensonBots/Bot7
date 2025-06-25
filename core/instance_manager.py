@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - FIXED Instance Manager with Shared State Support
-Now properly manages shared state between modules
+BENSON v2.0 - UPDATED Instance Manager with Enhanced Optimization
+Now properly manages shared state between modules and includes comprehensive optimization
 """
 
 import subprocess
@@ -500,42 +500,294 @@ class InstanceManager:
             print(f"[InstanceManager] ERROR cloning '{name}': {e}")
             return False
 
-    def optimize_instance_settings(self, name):
-        """Apply optimization settings using index-based commands"""
+    def get_current_instance_settings(self, name):
+        """Get current instance settings from MEmu"""
         try:
-            settings = {
-                'default_ram_mb': 2048,
-                'default_cpu_cores': 2
-            }
+            instance = self.get_instance_by_name(name)
+            if not instance:
+                print(f"[InstanceManager] Cannot get settings - instance {name} not found")
+                return None
+            
+            index = instance["index"]
+            
+            # Get current configuration
+            print(f"[InstanceManager] 📊 Reading current settings for {name}...")
+            
+            config_result = subprocess.run(
+                [self.MEMUC_PATH, "getconfiguration", "-i", str(index)],
+                capture_output=True, text=True, timeout=30
+            )
+            
+            if config_result.returncode != 0:
+                print(f"[InstanceManager] ❌ Failed to get configuration for {name}")
+                return None
+            
+            # Parse configuration output
+            current_settings = {}
+            lines = config_result.stdout.strip().split('\n')
+            
+            for line in lines:
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    current_settings[key.strip()] = value.strip()
+            
+            print(f"[InstanceManager] ✅ Current settings loaded for {name}")
+            return current_settings
+            
+        except Exception as e:
+            print(f"[InstanceManager] ❌ Error getting current settings for {name}: {e}")
+            return None
+
+    def optimize_instance_settings_enhanced(self, name, force_update=False):
+        """Enhanced optimization with current settings check and comprehensive configuration"""
+        try:
+            print(f"[InstanceManager] 🔧 Starting enhanced optimization for {name}...")
             
             instance = self.get_instance_by_name(name)
             if not instance:
-                print(f"[InstanceManager] Cannot optimize - instance {name} not found")
+                print(f"[InstanceManager] ❌ Cannot optimize - instance {name} not found")
                 return False
             
             index = instance["index"]
             
-            # Set RAM
-            ram_result = subprocess.run(
-                [self.MEMUC_PATH, "configure", "-i", str(index), "-memory", str(settings['default_ram_mb'])],
-                capture_output=True, text=True, timeout=30
-            )
+            # Define optimal settings
+            optimal_settings = {
+                'memory': '2048',           # RAM in MB
+                'cpu': '2',                 # CPU cores
+                'resolution': '480x800',    # Screen resolution (mobile portrait)
+                'dpi': '240',               # Screen DPI
+                'brand': 'samsung',         # Device brand
+                'model': 'SM-G973F',        # Device model (Galaxy S10)
+                'manufacturer': 'samsung',   # Manufacturer
+                'microvirt_vm_brand': 'samsung',
+                'microvirt_vm_model': 'SM-G973F'
+            }
             
-            # Set CPU
-            cpu_result = subprocess.run(
-                [self.MEMUC_PATH, "configure", "-i", str(index), "-cpu", str(settings['default_cpu_cores'])],
-                capture_output=True, text=True, timeout=30
-            )
+            # Region/Locale settings
+            region_settings = {
+                'language': 'en',           # English language
+                'country': 'US',            # US region
+                'timezone': 'America/New_York'  # Eastern timezone
+            }
             
-            if ram_result.returncode == 0 and cpu_result.returncode == 0:
-                print(f"[InstanceManager] Successfully optimized {name}")
+            # Get current settings first
+            if not force_update:
+                print(f"[InstanceManager] 📋 Checking current settings for {name}...")
+                current_settings = self.get_current_instance_settings(name)
+                
+                if current_settings:
+                    # Check if optimization is needed
+                    needs_optimization = False
+                    changes_needed = []
+                    
+                    for key, target_value in optimal_settings.items():
+                        current_value = current_settings.get(key, "unknown")
+                        if current_value != target_value:
+                            needs_optimization = True
+                            changes_needed.append(f"{key}: {current_value} → {target_value}")
+                    
+                    if not needs_optimization:
+                        print(f"[InstanceManager] ✅ {name} already optimized, skipping update")
+                        return True
+                    else:
+                        print(f"[InstanceManager] 🔄 Changes needed for {name}:")
+                        for change in changes_needed[:5]:  # Show first 5 changes
+                            print(f"[InstanceManager]   - {change}")
+                        if len(changes_needed) > 5:
+                            print(f"[InstanceManager]   - ... and {len(changes_needed) - 5} more")
+            
+            # Apply optimizations
+            optimization_results = []
+            
+            print(f"[InstanceManager] ⚙️ Applying performance optimizations for {name}...")
+            
+            # 1. Core Performance Settings
+            for setting_key, setting_value in optimal_settings.items():
+                try:
+                    result = subprocess.run(
+                        [self.MEMUC_PATH, "configure", "-i", str(index), f"-{setting_key}", setting_value],
+                        capture_output=True, text=True, timeout=30
+                    )
+                    
+                    if result.returncode == 0:
+                        optimization_results.append(f"✅ {setting_key}: {setting_value}")
+                    else:
+                        optimization_results.append(f"❌ {setting_key}: Failed")
+                        print(f"[InstanceManager] ⚠️ Failed to set {setting_key}: {result.stderr}")
+                    
+                    time.sleep(0.5)  # Small delay between settings
+                    
+                except Exception as e:
+                    optimization_results.append(f"❌ {setting_key}: Error")
+                    print(f"[InstanceManager] ❌ Error setting {setting_key}: {e}")
+            
+            # 2. Region and Locale Settings
+            print(f"[InstanceManager] 🌍 Applying region/locale settings for {name}...")
+            
+            for setting_key, setting_value in region_settings.items():
+                try:
+                    result = subprocess.run(
+                        [self.MEMUC_PATH, "configure", "-i", str(index), f"-{setting_key}", setting_value],
+                        capture_output=True, text=True, timeout=30
+                    )
+                    
+                    if result.returncode == 0:
+                        optimization_results.append(f"✅ {setting_key}: {setting_value}")
+                    else:
+                        optimization_results.append(f"❌ {setting_key}: Failed")
+                        print(f"[InstanceManager] ⚠️ Failed to set {setting_key}: {result.stderr}")
+                    
+                    time.sleep(0.5)
+                    
+                except Exception as e:
+                    optimization_results.append(f"❌ {setting_key}: Error")
+                    print(f"[InstanceManager] ❌ Error setting {setting_key}: {e}")
+            
+            # 3. Advanced Performance Settings
+            print(f"[InstanceManager] ⚡ Applying advanced settings for {name}...")
+            
+            advanced_settings = [
+                ("-startup_speed", "fast"),
+                ("-graphics_render_mode", "DirectX"),
+                ("-enable_hyperv", "1"),
+                ("-disk_shared", "1")
+            ]
+            
+            for setting_param, setting_value in advanced_settings:
+                try:
+                    result = subprocess.run(
+                        [self.MEMUC_PATH, "configure", "-i", str(index), setting_param, setting_value],
+                        capture_output=True, text=True, timeout=30
+                    )
+                    
+                    if result.returncode == 0:
+                        optimization_results.append(f"✅ {setting_param[1:]}: {setting_value}")
+                    else:
+                        optimization_results.append(f"❌ {setting_param[1:]}: Failed")
+                    
+                    time.sleep(0.5)
+                    
+                except Exception as e:
+                    optimization_results.append(f"❌ {setting_param[1:]}: Error")
+            
+            # Count successful optimizations
+            successful = len([r for r in optimization_results if r.startswith("✅")])
+            total = len(optimization_results)
+            
+            print(f"[InstanceManager] 📊 Optimization results for {name}: {successful}/{total} successful")
+            
+            # Show summary of changes
+            success_changes = [r for r in optimization_results if r.startswith("✅")]
+            failed_changes = [r for r in optimization_results if r.startswith("❌")]
+            
+            if success_changes:
+                print(f"[InstanceManager] ✅ Successfully applied:")
+                for change in success_changes[:3]:  # Show first 3
+                    print(f"[InstanceManager]   {change}")
+                if len(success_changes) > 3:
+                    print(f"[InstanceManager]   ... and {len(success_changes) - 3} more")
+            
+            if failed_changes:
+                print(f"[InstanceManager] ❌ Failed to apply:")
+                for change in failed_changes[:2]:  # Show first 2 failures
+                    print(f"[InstanceManager]   {change}")
+                if len(failed_changes) > 2:
+                    print(f"[InstanceManager]   ... and {len(failed_changes) - 2} more")
+            
+            # Consider optimization successful if at least 70% of settings applied
+            success_rate = successful / total if total > 0 else 0
+            optimization_successful = success_rate >= 0.7
+            
+            if optimization_successful:
+                print(f"[InstanceManager] ✅ Enhanced optimization completed for {name} ({success_rate:.1%} success rate)")
+            else:
+                print(f"[InstanceManager] ⚠️ Optimization partially failed for {name} ({success_rate:.1%} success rate)")
+            
+            return optimization_successful
+            
+        except Exception as e:
+            print(f"[InstanceManager] ❌ Error in enhanced optimization for {name}: {e}")
+            return False
+
+    def verify_optimization(self, name):
+        """Verify that optimization was applied correctly"""
+        try:
+            print(f"[InstanceManager] 🔍 Verifying optimization for {name}...")
+            
+            current_settings = self.get_current_instance_settings(name)
+            if not current_settings:
+                print(f"[InstanceManager] ❌ Cannot verify - unable to read settings")
+                return False
+            
+            # Check key settings
+            key_checks = {
+                'memory': '2048',
+                'cpu': '2',
+                'resolution': '480x800',
+                'brand': 'samsung'
+            }
+            
+            verified_count = 0
+            total_checks = len(key_checks)
+            
+            for setting, expected_value in key_checks.items():
+                actual_value = current_settings.get(setting, "unknown")
+                if actual_value == expected_value:
+                    verified_count += 1
+                    print(f"[InstanceManager] ✅ {setting}: {actual_value}")
+                else:
+                    print(f"[InstanceManager] ❌ {setting}: expected {expected_value}, got {actual_value}")
+            
+            verification_rate = verified_count / total_checks
+            
+            if verification_rate >= 0.75:
+                print(f"[InstanceManager] ✅ Optimization verified for {name} ({verification_rate:.1%})")
                 return True
             else:
-                print(f"[InstanceManager] Optimization partially failed for {name}")
+                print(f"[InstanceManager] ⚠️ Optimization verification failed for {name} ({verification_rate:.1%})")
                 return False
-                
+            
         except Exception as e:
-            print(f"[InstanceManager] Error optimizing {name}: {e}")
+            print(f"[InstanceManager] ❌ Error verifying optimization for {name}: {e}")
+            return False
+
+    def optimize_instance_settings(self, name, force_update=False, verify=True):
+        """
+        Enhanced instance optimization with current settings check
+        
+        Args:
+            name: Instance name
+            force_update: Skip current settings check and force update
+            verify: Verify optimization after applying
+        
+        Returns:
+            bool: True if optimization successful
+        """
+        try:
+            # Step 1: Enhanced optimization
+            optimization_success = self.optimize_instance_settings_enhanced(name, force_update)
+            
+            if not optimization_success:
+                print(f"[InstanceManager] ❌ Optimization failed for {name}")
+                return False
+            
+            # Step 2: Verification (optional)
+            if verify:
+                time.sleep(2)  # Wait for settings to apply
+                verification_success = self.verify_optimization(name)
+                
+                if verification_success:
+                    print(f"[InstanceManager] ✅ Complete optimization and verification successful for {name}")
+                else:
+                    print(f"[InstanceManager] ⚠️ Optimization applied but verification failed for {name}")
+                    
+                return verification_success
+            else:
+                print(f"[InstanceManager] ✅ Optimization applied for {name} (verification skipped)")
+                return True
+            
+        except Exception as e:
+            print(f"[InstanceManager] ❌ Error in optimization process for {name}: {e}")
             return False
 
     # Helper methods
