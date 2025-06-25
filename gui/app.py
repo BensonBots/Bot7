@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-BENSON v2.0 - FIXED Main Application with Auto-startup Integration
-Working loading animation and proper auto-startup triggering
+BENSON v2.0 - FIXED Main Application
+Resolves module initialization loop and properly integrates split components
 """
 
 import tkinter as tk
@@ -11,7 +11,6 @@ import time
 
 # Import our custom modules
 from core.instance_manager import InstanceManager
-from utils.module_manager import ModuleManager
 
 
 class BensonApp(tk.Tk):
@@ -50,18 +49,14 @@ class BensonApp(tk.Tk):
         self.search_var = tk.StringVar()
         self.search_entry = None
 
-        # Create a temporary window just for the loading screen
-        self.temp_window = tk.Toplevel()
-        self.temp_window.withdraw()  # Hide it initially
-        
-        # Create simple loading overlay
+        # Create loading screen
         self.loading = self._create_simple_loading()
         
-        # Start initialization
-        self.after(100, self.initialize_background)
+        # FIXED: Start initialization with proper delay
+        self.after(500, self.initialize_background)
 
     def _create_simple_loading(self):
-        """Create a compact, professional loading dialog"""
+        """Create loading dialog"""
         
         # Create loading window
         loading_window = tk.Toplevel(self)
@@ -80,9 +75,6 @@ class BensonApp(tk.Tk):
         y = (screen_height // 2) - (window_height // 2)
         loading_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
         
-        # Keep window decorations but make it non-resizable
-        # loading_window.overrideredirect(True)  # Removed this line
-        
         # Main container with border
         main_container = tk.Frame(loading_window, bg="#00d4ff", bd=2, relief="solid")
         main_container.pack(fill="both", expand=True, padx=2, pady=2)
@@ -91,7 +83,7 @@ class BensonApp(tk.Tk):
         content_frame = tk.Frame(main_container, bg="#1a1f2e")
         content_frame.pack(fill="both", expand=True, padx=2, pady=2)
         
-        # Logo - smaller and more appropriate
+        # Logo
         logo = tk.Label(content_frame, text="⚡", bg="#1a1f2e", fg="#00d4ff", 
                        font=("Segoe UI", 48, "bold"))
         logo.pack(pady=(30, 15))
@@ -138,8 +130,8 @@ class BensonApp(tk.Tk):
         loading_window.lift()
         loading_window.focus_force()
         
-        # Simple, clean loading controller
-        class CompactLoadingController:
+        # Loading controller
+        class LoadingController:
             def __init__(self, window, status_label, dots_label, progress_canvas):
                 self.window = window
                 self.status_label = status_label
@@ -179,7 +171,7 @@ class BensonApp(tk.Tk):
                             "connecting": "🔗", "loading": "📦", "initializing": "⚙️",
                             "setting up": "🛠️", "building": "🏗️", "creating": "🎯",
                             "console": "📝", "finishing": "🎉", "ready": "✨",
-                            "finalizing": "✨"
+                            "finalizing": "✨", "modules": "🔧"
                         }
                         
                         icon = "🚀"
@@ -188,38 +180,37 @@ class BensonApp(tk.Tk):
                                 icon = emoji
                                 break
                         
-                        # Truncate long status messages
                         if len(status_text) > 25:
                             status_text = status_text[:22] + "..."
                         
                         formatted_status = f"{icon} {status_text}"
                         self.status_label.configure(text=formatted_status)
-                        print(f"[LoadingOverlay] 📝 Status: {formatted_status}")
+                        print(f"[LoadingOverlay] Status: {formatted_status}")
                 except:
                     pass
             
             def close(self):
                 try:
-                    print("[LoadingOverlay] 🔄 Closing overlay...")
+                    print("[LoadingOverlay] Closing overlay...")
                     self.running = False
                     if self.animation_id:
                         self.window.after_cancel(self.animation_id)
                     if self.window.winfo_exists():
                         self.window.destroy()
-                    print("[LoadingOverlay] ✅ Overlay closed")
+                    print("[LoadingOverlay] Overlay closed")
                 except:
                     pass
         
-        print("[LoadingOverlay] ✅ Compact loading dialog created")
-        return CompactLoadingController(loading_window, status_label, dots_label, progress_canvas)
+        print("[LoadingOverlay] Loading dialog created")
+        return LoadingController(loading_window, status_label, dots_label, progress_canvas)
 
     def initialize_background(self):
-        """Initialize with proper status updates"""
+        """FIXED: Initialize with proper error handling and no loops"""
         def init_worker():
             try:
                 # Step 1: Create InstanceManager
                 self._safe_update_status("Connecting to MEmu...")
-                time.sleep(1.0)  # Longer delay to see animation
+                time.sleep(1.0)
 
                 self.instance_manager = InstanceManager()
                 self.instance_manager.app = self
@@ -233,19 +224,26 @@ class BensonApp(tk.Tk):
                 instances_count = len(self.instance_manager.get_instances())
                 print(f"[Init] {instances_count} instances loaded")
 
-                # Step 3: Initialize modules
+                # Step 3: Initialize modules PROPERLY
                 self._safe_update_status("Initializing modules...")
                 time.sleep(1.0)
 
-                self.module_manager = ModuleManager(self)
-                self.module_manager.initialize_modules()
-                print("[Init] Modules initialized")
+                # FIXED: Import the FIXED module manager
+                try:
+                    from utils.module_manager import ModuleManager
+                    self.module_manager = ModuleManager(self)
+                    print("[Init] ✅ Module manager created successfully")
+                    # Note: ModuleManager now initializes itself in __init__
+                except Exception as e:
+                    print(f"[Init] ❌ Module manager creation failed: {e}")
+                    # Continue without modules
+                    self.module_manager = None
 
                 # Step 4: Setup utilities
                 self._safe_update_status("Setting up utilities...")
                 time.sleep(1.0)
 
-                # Import here to avoid circular imports
+                # Import utilities
                 from utils.instance_operations import InstanceOperations
                 from utils.ui_manager import UIManager
                 
@@ -269,7 +267,7 @@ class BensonApp(tk.Tk):
         """Safely update loading status"""
         try:
             self.after(0, lambda: self.loading.update_status(status))
-            time.sleep(0.3)  # Give time for UI to update
+            time.sleep(0.3)
         except Exception as e:
             print(f"[Init] Error updating status: {e}")
 
@@ -292,6 +290,16 @@ class BensonApp(tk.Tk):
             print("[BensonApp] Adding initial console messages...")
             self.add_console_message("BENSON v2.0 started")
             self.add_console_message(f"Loaded {instances_count} MEmu instances")
+            
+            # FIXED: Report module system status
+            if self.module_manager:
+                if hasattr(self.module_manager, 'initialization_complete') and self.module_manager.initialization_complete:
+                    self.add_console_message("✅ Module system initialized successfully")
+                else:
+                    self.add_console_message("⚠️ Module system initializing in background...")
+            else:
+                self.add_console_message("⚠️ Module system not available")
+            
             print("[BensonApp] Initial console messages added")
 
             # Finalize - start card loading process
@@ -431,9 +439,17 @@ class BensonApp(tk.Tk):
                 self.after(200, lambda: self._ensure_console_ready_and_add_messages(instances_count))
                 return
             
-            # Add the missing console messages that should have been added earlier
+            # Add the final console messages
             print("[Console] Adding final console messages...")
             self.add_console_message(f"✅ BENSON v2.0 ready with {instances_count} instances")
+            
+            # FIXED: Module system status update
+            if self.module_manager:
+                if hasattr(self.module_manager, 'initialization_complete'):
+                    if self.module_manager.initialization_complete:
+                        self.add_console_message("🔧 Module system ready for automation")
+                    else:
+                        self.add_console_message("🔧 Module system initializing...")
             
             # Force console update
             self.console_text.update_idletasks()
@@ -480,13 +496,6 @@ class BensonApp(tk.Tk):
             # Close loading overlay
             self.loading.close()
             
-            # Clean up temp window
-            if hasattr(self, 'temp_window'):
-                try:
-                    self.temp_window.destroy()
-                except:
-                    pass
-            
             # NOW show the main window
             self.deiconify()
             
@@ -499,27 +508,16 @@ class BensonApp(tk.Tk):
             
             print("[BensonApp] ✅ Main window is now visible and ready!")
             
-            # NEW: Trigger initial auto-startup check after app is fully loaded
-            self.after(2000, self._trigger_initial_auto_startup)
+            # FIXED: NO automatic auto-startup trigger here anymore
+            # The module manager handles this automatically in its initialization
             
         except Exception as e:
             print(f"[CloseLoading] Error: {e}")
             # Fallback - show window anyway
             self.deiconify()
 
-    def _trigger_initial_auto_startup(self):
-        """NEW: Trigger initial auto-startup check after app is fully loaded"""
-        try:
-            if hasattr(self, 'module_manager') and self.module_manager:
-                self.add_console_message("🔍 Performing initial auto-startup check...")
-                self.module_manager.check_auto_startup_initial()
-            else:
-                print("[BensonApp] Module manager not available for auto-startup")
-        except Exception as e:
-            print(f"[AutoStartup] Error triggering initial auto-startup: {e}")
-
     def force_refresh_instances(self):
-        """Force refresh instances - called by instance manager (DISABLED)"""
+        """Force refresh instances - called by instance manager"""
         try:
             print("[BensonApp] Force refresh disabled - using simple card addition instead")
             # Don't do full refresh anymore - instance operations handle it
@@ -552,8 +550,8 @@ class BensonApp(tk.Tk):
                     # Force immediate update for visibility
                     card.update_idletasks()
                     
-                    # Update UI every few cards with more aggressive updates
-                    if i % 2 == 1:  # Update more frequently
+                    # Update UI every few cards
+                    if i % 2 == 1:
                         self.update_idletasks()
                         self.update()
                     
@@ -652,11 +650,16 @@ class BensonApp(tk.Tk):
                 if start_success:
                     self.add_console_message(f"✅ Started: {name}")
                     
-                    # NEW: Trigger auto-startup check for this specific instance
-                    if hasattr(self, 'module_manager') and self.module_manager:
-                        self.add_console_message(f"🔍 Checking auto-startup for {name}...")
+                    # FIXED: Trigger module auto-startup only if module manager exists and is ready
+                    if (hasattr(self, 'module_manager') and self.module_manager and 
+                        hasattr(self.module_manager, 'initialization_complete') and 
+                        self.module_manager.initialization_complete):
+                        
+                        self.add_console_message(f"🔍 Checking modules for {name}...")
                         # Use the main thread to trigger auto-startup
-                        self.after(0, lambda: self.module_manager.trigger_auto_startup_for_instance(name))
+                        self.after(3000, lambda: self.module_manager.trigger_auto_startup_for_instance(name))
+                    else:
+                        self.add_console_message(f"ℹ️ Module system not ready for {name}")
                     
                 else:
                     self.add_console_message(f"❌ Failed to start: {name}")
@@ -700,7 +703,6 @@ class BensonApp(tk.Tk):
             # Force immediate update
             self.console_text.update_idletasks()
             
-            print(f"[Console] Successfully added message: {message}")
         except Exception as e:
             print(f"[Console] Error adding message: {e} - Message was: {message}")
 
@@ -829,7 +831,7 @@ class BensonApp(tk.Tk):
         try:
             if hasattr(self, 'loading'):
                 self.loading.close()
-            if hasattr(self, 'module_manager'):
+            if hasattr(self, 'module_manager') and self.module_manager:
                 self.module_manager.stop_status_monitoring()
         except:
             pass

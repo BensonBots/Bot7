@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - FIXED Module Manager with Reduced Spam
-Now properly manages modules with minimal console noise
+BENSON v2.0 - FIXED Module Manager - Resolves Initialization Loop
+Fixed the endless "Module system not ready" loop and proper initialization
 """
 
 import os
@@ -11,13 +11,14 @@ from typing import Dict, List
 
 
 class ModuleManager:
-    """FIXED: Module manager with reduced spam and better module communication"""
+    """FIXED: Module manager that properly initializes and stops the loop"""
     
     def __init__(self, app_ref):
         self.app = app_ref
         self.instance_modules = {}  # instance_name -> {module_name: module_instance}
         self.settings_cache = {}
         self.initialization_complete = False
+        self.initialization_in_progress = False  # NEW: Prevent multiple initializations
         
         # Status monitoring with spam reduction
         self.status_monitor_running = False
@@ -37,6 +38,38 @@ class ModuleManager:
             "cleanup": 120,       # Only log cleanup every 2 minutes
             "monitoring": 600     # Only log monitoring updates every 10 minutes
         }
+        
+        # NEW: Initialize immediately instead of waiting
+        print("[ModuleManager] Starting immediate initialization...")
+        self._initialize_now()
+    
+    def _initialize_now(self):
+        """FIXED: Initialize immediately in background thread"""
+        if self.initialization_in_progress:
+            print("[ModuleManager] Initialization already in progress")
+            return
+            
+        self.initialization_in_progress = True
+        
+        def init_worker():
+            try:
+                print("[ModuleManager] Background initialization started...")
+                time.sleep(1)  # Small delay to let UI settle
+                
+                # Initialize the modules
+                self.initialize_modules()
+                
+                print("[ModuleManager] Background initialization completed")
+                
+            except Exception as e:
+                print(f"[ModuleManager] Background initialization error: {e}")
+                import traceback
+                traceback.print_exc()
+            finally:
+                self.initialization_in_progress = False
+        
+        # Start initialization in background
+        threading.Thread(target=init_worker, daemon=True, name="ModuleInit").start()
     
     def _should_log_message(self, message_type: str) -> bool:
         """Check if we should log this type of message to reduce spam"""
@@ -55,102 +88,167 @@ class ModuleManager:
             self.app.add_console_message(message)
     
     def initialize_modules(self):
-        """Initialize all modules for all instances"""
+        """FIXED: Initialize all modules for all instances with better error handling"""
         try:
-            # Import module classes
-            from modules.autostart_game import AutoStartGameModule
+            print("[ModuleManager] Starting module initialization...")
+            
+            # Import module classes with error handling
+            try:
+                from modules.autostart_game import AutoStartGameModule
+                print("[ModuleManager] ✅ AutoStartGame imported successfully")
+            except ImportError as e:
+                print(f"[ModuleManager] ❌ Failed to import AutoStartGame: {e}")
+                self._log_with_spam_filter("❌ AutoStartGame module not available - check modules/autostart_game.py")
+                return
             
             # Try to import optional modules
             AutoGatherModule = None
             try:
                 from modules.auto_gather import AutoGatherModule
-            except ImportError:
-                self._log_with_spam_filter("⚠️ AutoGather module not available")
+                print("[ModuleManager] ✅ AutoGather imported successfully")
+            except ImportError as e:
+                print(f"[ModuleManager] ⚠️ AutoGather not available: {e}")
+                self._log_with_spam_filter("⚠️ AutoGather module not available - install dependencies or check modules/auto_gather.py")
             
-            instances = self.app.instance_manager.get_instances()
+            # Get instances
+            try:
+                instances = self.app.instance_manager.get_instances()
+                print(f"[ModuleManager] Found {len(instances)} instances")
+            except Exception as e:
+                print(f"[ModuleManager] ❌ Failed to get instances: {e}")
+                self._log_with_spam_filter("❌ Could not load instances for module initialization")
+                return
             
+            if not instances:
+                print("[ModuleManager] No instances found, but initialization will continue")
+                self._log_with_spam_filter("ℹ️ No instances found - modules will be created when instances are added")
+            
+            # Initialize modules for each instance
             for instance in instances:
                 instance_name = instance["name"]
                 
-                # Load settings for this instance
-                settings = self._load_instance_settings(instance_name)
-                self.settings_cache[instance_name] = settings
-                
-                # Initialize module container for this instance
-                self.instance_modules[instance_name] = {}
-                self.running_modules[instance_name] = {}
-                
-                # Create AutoStartGame module (always enabled)
-                autostart_config = settings.get("autostart_game", {})
-                autostart_module = AutoStartGameModule(
-                    instance_name=instance_name,
-                    shared_resources=self.app.instance_manager,
-                    console_callback=self.app.add_console_message
-                )
-                self.instance_modules[instance_name]["AutoStartGameModule"] = autostart_module
-                self.running_modules[instance_name]["AutoStartGameModule"] = False
-                
-                # Create AutoGather module if available and enabled
-                if AutoGatherModule and settings.get("auto_gather", {}).get("enabled", True):
-                    gather_module = AutoGatherModule(
-                        instance_name=instance_name,
-                        shared_resources=self.app.instance_manager,
-                        console_callback=self.app.add_console_message
-                    )
-                    self.instance_modules[instance_name]["AutoGatherModule"] = gather_module
-                    self.running_modules[instance_name]["AutoGatherModule"] = False
-                    self._log_with_spam_filter(f"✅ AutoGather module initialized for {instance_name}")
-                
-                self._log_with_spam_filter(f"🔧 Initialized module system for {instance_name}")
+                try:
+                    # Load settings for this instance
+                    settings = self._load_instance_settings(instance_name)
+                    self.settings_cache[instance_name] = settings
+                    
+                    # Initialize module container for this instance
+                    self.instance_modules[instance_name] = {}
+                    self.running_modules[instance_name] = {}
+                    
+                    # Create AutoStartGame module (always enabled)
+                    try:
+                        autostart_config = settings.get("autostart_game", {})
+                        autostart_module = AutoStartGameModule(
+                            instance_name=instance_name,
+                            shared_resources=self.app.instance_manager,
+                            console_callback=self.app.add_console_message
+                        )
+                        self.instance_modules[instance_name]["AutoStartGameModule"] = autostart_module
+                        self.running_modules[instance_name]["AutoStartGameModule"] = False
+                        print(f"[ModuleManager] ✅ AutoStartGame created for {instance_name}")
+                    except Exception as e:
+                        print(f"[ModuleManager] ❌ Failed to create AutoStartGame for {instance_name}: {e}")
+                        continue
+                    
+                    # Create AutoGather module if available and enabled
+                    if AutoGatherModule and settings.get("auto_gather", {}).get("enabled", True):
+                        try:
+                            gather_module = AutoGatherModule(
+                                instance_name=instance_name,
+                                shared_resources=self.app.instance_manager,
+                                console_callback=self.app.add_console_message
+                            )
+                            self.instance_modules[instance_name]["AutoGatherModule"] = gather_module
+                            self.running_modules[instance_name]["AutoGatherModule"] = False
+                            print(f"[ModuleManager] ✅ AutoGather created for {instance_name}")
+                            self._log_with_spam_filter(f"✅ AutoGather module initialized for {instance_name}")
+                        except Exception as e:
+                            print(f"[ModuleManager] ❌ Failed to create AutoGather for {instance_name}: {e}")
+                    
+                    self._log_with_spam_filter(f"🔧 Initialized module system for {instance_name}")
+                    
+                except Exception as e:
+                    print(f"[ModuleManager] ❌ Error initializing modules for {instance_name}: {e}")
+                    continue
             
+            # CRITICAL: Mark initialization as complete
             self.initialization_complete = True
+            print("[ModuleManager] ✅ Module initialization completed successfully")
             self._log_with_spam_filter(f"✅ Module system ready for {len(self.instance_modules)} instances")
             
             # Start QUIET status monitoring
             self._start_quiet_status_monitoring()
             
+            # FIXED: Trigger initial auto-startup check after a delay
+            self.app.after(3000, self._trigger_initial_auto_startup_check)
+            
         except Exception as e:
+            print(f"[ModuleManager] ❌ Critical module initialization error: {e}")
             self._log_with_spam_filter(f"❌ Module initialization error: {e}")
             import traceback
             traceback.print_exc()
+            
+            # Even if there are errors, mark as complete to stop the loop
+            self.initialization_complete = True
+    
+    def _trigger_initial_auto_startup_check(self):
+        """FIXED: Trigger initial auto-startup check with proper delay"""
+        try:
+            if not self.initialization_complete:
+                print("[ModuleManager] Initialization not complete, skipping auto-startup")
+                return
+            
+            print("[ModuleManager] Triggering initial auto-startup check...")
+            self.check_auto_startup_initial()
+            
+        except Exception as e:
+            print(f"[ModuleManager] Error in initial auto-startup: {e}")
     
     def check_auto_startup_initial(self):
-        """Initial auto-startup check for all instances"""
+        """FIXED: Initial auto-startup check that doesn't loop"""
         if not self.initialization_complete:
-            self._log_with_spam_filter("⏳ Module system not ready, deferring auto-startup...")
-            self.app.after(2000, self.check_auto_startup_initial)
+            print("[ModuleManager] ⚠️ Module system still not ready - this should not happen anymore")
             return
         
         try:
             self._log_with_spam_filter("🔍 Initial module auto-startup check...")
             
             # Force refresh instance statuses
-            self.app.instance_manager.update_instance_statuses()
-            time.sleep(0.5)
+            try:
+                self.app.instance_manager.update_instance_statuses()
+                time.sleep(0.5)
+            except Exception as e:
+                print(f"[ModuleManager] Warning: Could not update instance statuses: {e}")
             
             auto_start_candidates = []
             
             for instance_name in self.instance_modules.keys():
-                settings = self.settings_cache.get(instance_name, {})
-                autostart_settings = settings.get("autostart_game", {})
-                
-                if autostart_settings.get("auto_startup", False):
-                    instance = self.app.instance_manager.get_instance(instance_name)
-                    if instance and instance["status"] == "Running":
-                        auto_start_candidates.append(instance_name)
-                        self._log_with_spam_filter(f"✅ {instance_name} ready for module auto-startup")
+                try:
+                    settings = self.settings_cache.get(instance_name, {})
+                    autostart_settings = settings.get("autostart_game", {})
+                    
+                    if autostart_settings.get("auto_startup", False):
+                        instance = self.app.instance_manager.get_instance(instance_name)
+                        if instance and instance["status"] == "Running":
+                            auto_start_candidates.append(instance_name)
+                            self._log_with_spam_filter(f"✅ {instance_name} ready for module auto-startup")
+                except Exception as e:
+                    print(f"[ModuleManager] Error checking {instance_name}: {e}")
+                    continue
             
             if auto_start_candidates:
                 self._log_with_spam_filter(f"🚀 Starting AutoStart for: {', '.join(auto_start_candidates)}")
                 
-                for instance_name in auto_start_candidates:
+                for i, instance_name in enumerate(auto_start_candidates):
                     # Stagger the starts
-                    delay = auto_start_candidates.index(instance_name) * 3000
+                    delay = i * 3000
                     self.app.after(delay, lambda name=instance_name: self._trigger_autostart_for_instance(name))
             else:
                 self._log_with_spam_filter("📱 No running instances configured for module auto-startup")
                 
         except Exception as e:
+            print(f"[ModuleManager] ❌ Initial module auto-startup error: {e}")
             self._log_with_spam_filter(f"❌ Initial module auto-startup error: {e}")
     
     def trigger_auto_startup_for_instance(self, instance_name: str):
@@ -501,8 +599,49 @@ class ModuleManager:
         except Exception as e:
             print(f"[ModuleManager] Quiet monitor error: {e}")
     
-    # ... [Rest of the methods remain similar but with spam reduction] ...
+    def _load_instance_settings(self, instance_name: str) -> Dict:
+        """Load settings for a specific instance"""
+        settings_file = f"settings_{instance_name}.json"
+        default_settings = {
+            "autostart_game": {
+                "auto_startup": False,
+                "max_retries": 3,
+                "retry_delay": 10,
+                "enabled": True
+            },
+            "auto_gather": {
+                "enabled": True,
+                "check_interval": 30,
+                "resource_types": ["food", "wood", "iron", "stone"],
+                "min_march_capacity": 100000,
+                "max_concurrent_gathers": 5
+            },
+            "march_assignment": {
+                "enabled": True,
+                "unlocked_queues": 2,
+                "queue_assignments": {"1": "AutoGather", "2": "AutoGather"}
+            }
+        }
+        
+        try:
+            if os.path.exists(settings_file):
+                with open(settings_file, 'r') as f:
+                    settings = json.load(f)
+                # Merge with defaults
+                for key, value in default_settings.items():
+                    if key not in settings:
+                        settings[key] = value
+                    else:
+                        for subkey, subvalue in value.items():
+                            if subkey not in settings[key]:
+                                settings[key][subkey] = subvalue
+                return settings
+        except Exception as e:
+            print(f"Error loading settings for {instance_name}: {e}")
+        
+        return default_settings
     
+    # Additional methods (same as before but with fixes)
     def get_module_status_for_instance(self, instance_name: str) -> Dict:
         """Get status of all modules for an instance"""
         if instance_name not in self.instance_modules:
@@ -557,48 +696,6 @@ class ModuleManager:
         except Exception as e:
             self._log_with_spam_filter(f"❌ Error manually stopping AutoGather: {e}")
             return False
-    
-    def _load_instance_settings(self, instance_name: str) -> Dict:
-        """Load settings for a specific instance"""
-        settings_file = f"settings_{instance_name}.json"
-        default_settings = {
-            "autostart_game": {
-                "auto_startup": False,
-                "max_retries": 3,
-                "retry_delay": 10,
-                "enabled": True
-            },
-            "auto_gather": {
-                "enabled": True,
-                "check_interval": 30,
-                "resource_types": ["food", "wood", "iron", "stone"],
-                "min_march_capacity": 100000,
-                "max_concurrent_gathers": 5
-            },
-            "march_assignment": {
-                "enabled": True,
-                "unlocked_queues": 2,
-                "queue_assignments": {"1": "AutoGather", "2": "AutoGather"}
-            }
-        }
-        
-        try:
-            if os.path.exists(settings_file):
-                with open(settings_file, 'r') as f:
-                    settings = json.load(f)
-                # Merge with defaults
-                for key, value in default_settings.items():
-                    if key not in settings:
-                        settings[key] = value
-                    else:
-                        for subkey, subvalue in value.items():
-                            if subkey not in settings[key]:
-                                settings[key][subkey] = subvalue
-                return settings
-        except Exception as e:
-            print(f"Error loading settings for {instance_name}: {e}")
-        
-        return default_settings
     
     def refresh_modules(self):
         """Refresh modules when instances change - QUIET VERSION"""
