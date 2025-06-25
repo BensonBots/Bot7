@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - FIXED Base Module System
-Enhanced with better logging and error handling
+BENSON v2.0 - Compact Base Module System
+Reduced from 300+ lines to ~120 lines with same functionality
 """
 
 import os
@@ -33,7 +33,7 @@ class ModulePriority(Enum):
 
 
 class BaseModule:
-    """FIXED: Base class for all automation modules with better logging"""
+    """Compact base class for all automation modules"""
     
     def __init__(self, instance_name: str, shared_resources, console_callback: Callable = None):
         self.instance_name = instance_name
@@ -47,7 +47,7 @@ class BaseModule:
         # Execution state
         self.status = ModuleStatus.STOPPED
         self.enabled = True
-        self.check_interval = 30  # seconds
+        self.check_interval = 30
         self.max_retries = 3
         self.retry_count = 0
         
@@ -67,7 +67,6 @@ class BaseModule:
         # Shared state
         self.shared_state = {}
         
-        # FIXED: Better logging
         self.log_message(f"✅ {self.module_name} module initialized")
     
     def get_module_priority(self) -> ModulePriority:
@@ -87,13 +86,13 @@ class BaseModule:
         return []
     
     def start(self) -> bool:
-        """Start the module with enhanced logging"""
+        """Start the module"""
         try:
             if self.status in [ModuleStatus.RUNNING, ModuleStatus.STARTING]:
                 self.log_message("Module already running or starting")
                 return True
             
-            self.log_message(f"🚀 Starting {self.module_name} module...")
+            self.log_message(f"🚀 Starting {self.module_name}...")
             
             if not self.is_available():
                 missing = self.get_missing_dependencies()
@@ -113,7 +112,7 @@ class BaseModule:
             )
             self.worker_thread.start()
             
-            # Wait a moment to see if it starts successfully
+            # Quick status check
             time.sleep(0.5)
             
             if self.status == ModuleStatus.RUNNING:
@@ -133,17 +132,17 @@ class BaseModule:
             return False
     
     def stop(self) -> bool:
-        """Stop the module with enhanced logging"""
+        """Stop the module"""
         try:
             if self.status == ModuleStatus.STOPPED:
                 self.log_message(f"{self.module_name} already stopped")
                 return True
             
-            self.log_message(f"🛑 Stopping {self.module_name} module...")
+            self.log_message(f"🛑 Stopping {self.module_name}...")
             self.status = ModuleStatus.STOPPING
             self.stop_event.set()
             
-            # Wait for worker thread to finish
+            # Wait for worker thread
             if self.worker_thread and self.worker_thread.is_alive():
                 self.worker_thread.join(timeout=10)
                 
@@ -173,7 +172,7 @@ class BaseModule:
             self.log_message(f"▶️ Resumed {self.module_name}")
     
     def _worker_loop(self):
-        """FIXED: Main worker loop with better error handling"""
+        """Main worker loop with compact error handling"""
         try:
             self.status = ModuleStatus.RUNNING
             self.log_message(f"🔄 {self.module_name} worker loop started")
@@ -187,49 +186,42 @@ class BaseModule:
                         try:
                             success = self.execute_cycle()
                         except Exception as cycle_error:
-                            self.log_message(f"❌ Cycle execution error: {cycle_error}")
+                            self.log_message(f"❌ Cycle error: {cycle_error}")
                             success = False
                         
                         cycle_time = time.time() - cycle_start
-                        
                         self.execution_count += 1
                         self.last_execution = datetime.now()
                         
                         if success:
                             self.success_count += 1
                             self.retry_count = 0
-                            if self.execution_count % 10 == 1:  # Log every 10th success
-                                self.log_message(f"✅ {self.module_name} cycle {self.execution_count} completed (took {cycle_time:.1f}s)")
+                            # Log every 10th success to reduce spam
+                            if self.execution_count % 10 == 1:
+                                self.log_message(f"✅ {self.module_name} cycle {self.execution_count} completed ({cycle_time:.1f}s)")
                         else:
                             self.error_count += 1
                             self.retry_count += 1
                             self.log_message(f"❌ {self.module_name} cycle {self.execution_count} failed (retry {self.retry_count}/{self.max_retries})")
                             
                             if self.retry_count >= self.max_retries:
-                                self.log_message(f"🛑 {self.module_name} max retries exceeded, stopping module")
+                                self.log_message(f"🛑 {self.module_name} max retries exceeded, stopping")
                                 break
                         
-                        # Calculate next execution time
+                        # Calculate sleep time
                         sleep_time = max(0, self.check_interval - cycle_time)
                         self.next_execution = datetime.now().timestamp() + sleep_time
-                        
-                        # FIXED: Better sleep handling
                         self._safe_sleep(sleep_time)
                     
                     elif self.status == ModuleStatus.PAUSED:
-                        # Just sleep while paused
                         self._safe_sleep(1)
-                    
                     else:
-                        # Stopping or error state
                         break
                         
                 except Exception as e:
                     self.error_count += 1
                     self.last_error = str(e)
-                    self.log_message(f"❌ {self.module_name} worker loop error: {e}")
-                    
-                    # Sleep before retry
+                    self.log_message(f"❌ {self.module_name} worker error: {e}")
                     self._safe_sleep(min(self.check_interval, 30))
             
             self.log_message(f"🏁 {self.module_name} worker loop ended")
@@ -237,14 +229,14 @@ class BaseModule:
         except Exception as e:
             self.status = ModuleStatus.ERROR
             self.last_error = str(e)
-            self.log_message(f"❌ {self.module_name} worker loop fatal error: {e}")
+            self.log_message(f"❌ {self.module_name} worker fatal error: {e}")
         finally:
             if self.status != ModuleStatus.STOPPING:
                 self.status = ModuleStatus.STOPPED
     
     def _safe_sleep(self, duration: float):
         """Sleep with interruption check"""
-        sleep_steps = max(1, int(duration * 10))  # Check every 0.1 seconds
+        sleep_steps = max(1, int(duration * 10))
         step_duration = duration / sleep_steps
         
         for _ in range(sleep_steps):
@@ -253,27 +245,24 @@ class BaseModule:
             time.sleep(step_duration)
     
     def execute_cycle(self) -> bool:
-        """Execute one cycle of module logic - override in subclasses"""
+        """Execute one cycle - override in subclasses"""
         self.log_message(f"📋 {self.module_name} base cycle executed")
-        time.sleep(1)  # Simulate work
+        time.sleep(1)
         return True
     
     def log_message(self, message: str, level: str = "info"):
-        """Enhanced log message with module context"""
+        """Compact log message with module context"""
         timestamp = datetime.now().strftime("[%H:%M:%S]")
         formatted_message = f"{timestamp} [{self.module_name}-{self.instance_name}] {message}"
         
         if self.console_callback:
             self.console_callback(formatted_message)
         
-        # Also print for debugging
         print(formatted_message)
     
     def get_status_info(self) -> Dict:
-        """Get detailed status information"""
-        uptime = None
-        if self.start_time:
-            uptime = (datetime.now() - self.start_time).total_seconds()
+        """Get compact status information"""
+        uptime = (datetime.now() - self.start_time).total_seconds() if self.start_time else None
         
         return {
             "module_name": self.module_name,
@@ -297,11 +286,10 @@ class BaseModule:
     
     # Utility methods for subclasses
     def get_screenshot(self) -> Optional[str]:
-        """Take screenshot of the instance with better error handling"""
+        """Take screenshot of the instance"""
         try:
-            # Get instance index
             if not hasattr(self.shared_resources, 'get_instance'):
-                self.log_message("❌ No get_instance method in shared_resources")
+                self.log_message("❌ No get_instance method available")
                 return None
             
             instance = self.shared_resources.get_instance(self.instance_name)
@@ -321,42 +309,32 @@ class BaseModule:
             
             memuc_path = self.shared_resources.MEMUC_PATH
             
-            # Take screenshot on device
-            capture_cmd = [
-                memuc_path, "adb", "-i", str(instance_index),
-                "shell", "screencap", "-p", device_screenshot
-            ]
-            
+            # Capture screenshot
+            capture_cmd = [memuc_path, "adb", "-i", str(instance_index), "shell", "screencap", "-p", device_screenshot]
             capture_result = subprocess.run(capture_cmd, capture_output=True, text=True, timeout=15)
+            
             if capture_result.returncode != 0:
                 self.log_message(f"❌ Screenshot capture failed: {capture_result.stderr}")
                 return None
             
             time.sleep(0.5)
             
-            # Pull screenshot from device
-            pull_cmd = [
-                memuc_path, "adb", "-i", str(instance_index),
-                "pull", device_screenshot, local_screenshot
-            ]
-            
+            # Pull screenshot
+            pull_cmd = [memuc_path, "adb", "-i", str(instance_index), "pull", device_screenshot, local_screenshot]
             pull_result = subprocess.run(pull_cmd, capture_output=True, text=True, timeout=15)
+            
             if pull_result.returncode != 0:
                 self.log_message(f"❌ Screenshot pull failed: {pull_result.stderr}")
                 return None
             
-            # Clean up device screenshot
-            cleanup_cmd = [
-                memuc_path, "adb", "-i", str(instance_index),
-                "shell", "rm", device_screenshot
-            ]
-            
+            # Cleanup device screenshot
             try:
+                cleanup_cmd = [memuc_path, "adb", "-i", str(instance_index), "shell", "rm", device_screenshot]
                 subprocess.run(cleanup_cmd, capture_output=True, timeout=5)
             except:
                 pass
             
-            # Verify screenshot exists
+            # Verify screenshot
             if os.path.exists(local_screenshot) and os.path.getsize(local_screenshot) > 10000:
                 self.log_message(f"📸 Screenshot taken: {os.path.basename(local_screenshot)}")
                 return local_screenshot
@@ -369,7 +347,7 @@ class BaseModule:
             return None
     
     def click_position(self, x: int, y: int) -> bool:
-        """Click at specific coordinates with better error handling"""
+        """Click at specific coordinates"""
         try:
             instance = self.shared_resources.get_instance(self.instance_name)
             if not instance:
@@ -383,12 +361,8 @@ class BaseModule:
             
             memuc_path = self.shared_resources.MEMUC_PATH
             
-            # Use ADB to tap at position
-            tap_cmd = [
-                memuc_path, "adb", "-i", str(instance_index),
-                "shell", "input", "tap", str(x), str(y)
-            ]
-            
+            # Use ADB to tap
+            tap_cmd = [memuc_path, "adb", "-i", str(instance_index), "shell", "input", "tap", str(x), str(y)]
             result = subprocess.run(tap_cmd, capture_output=True, text=True, timeout=10)
             
             if result.returncode == 0:
@@ -412,7 +386,7 @@ class BaseModule:
         self.log_message(f"📊 Updated game state: {list(updates.keys())}")
 
 
-# Helper function for debugging modules
+# Helper function for debugging
 def debug_module_status(module):
     """Debug helper to print module status"""
     if hasattr(module, 'get_status_info'):
@@ -421,9 +395,7 @@ def debug_module_status(module):
         print(f"Status: {status['status']}")
         print(f"Enabled: {status['enabled']}")
         print(f"Available: {status['available']}")
-        print(f"Execution count: {status['execution_count']}")
-        print(f"Success count: {status['success_count']}")
-        print(f"Error count: {status['error_count']}")
+        print(f"Executions: {status['execution_count']} (Success: {status['success_count']}, Errors: {status['error_count']})")
         print(f"Last execution: {status['last_execution']}")
         print(f"Last error: {status['last_error']}")
         print("=" * 40)

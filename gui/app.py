@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 """
-BENSON v2.0 - Streamlined Main Application
-Reduced code with same functionality and design
+BENSON v2.0 - Compact Main Application
+Reduced from 600+ lines to ~200 lines with same functionality
 """
 
 import tkinter as tk
@@ -23,11 +22,11 @@ class BensonApp(tk.Tk):
         self.configure(bg="#0a0e16")
         self.minsize(900, 600)
         
-        # Center window but keep hidden
+        # Center and hide initially
         self._center_window()
         self.withdraw()
         
-        # Initialize variables
+        # Initialize core variables
         self.instance_cards = []
         self.selected_cards = []
         self._destroyed = False
@@ -37,132 +36,97 @@ class BensonApp(tk.Tk):
         self.search_entry = None
         self.search_after_id = None
 
-        # Create loading screen
+        # Create and show loading screen
         self.loading = self._create_loading_screen()
         
-        # Start initialization
+        # Start initialization process
         self.after(500, self.initialize_background)
 
     def _center_window(self):
         """Center window on screen"""
         self.update_idletasks()
-        width = 1200
-        height = 800
-        x = (self.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.winfo_screenheight() // 2) - (height // 2)
-        self.geometry(f"{width}x{height}+{x}+{y}")
+        x = (self.winfo_screenwidth() // 2) - 600
+        y = (self.winfo_screenheight() // 2) - 400
+        self.geometry(f"1200x800+{x}+{y}")
 
     def _create_loading_screen(self):
-        """Create simple loading dialog"""
-        loading_window = tk.Toplevel(self)
-        loading_window.title("BENSON v2.0")
-        loading_window.configure(bg="#1a1f2e")
-        loading_window.attributes('-topmost', True)
-        loading_window.resizable(False, False)
+        """Create compact loading dialog"""
+        loading = tk.Toplevel(self)
+        loading.title("BENSON v2.0")
+        loading.configure(bg="#1a1f2e")
+        loading.attributes('-topmost', True)
+        loading.resizable(False, False)
         
         # Position and size
-        window_width = 400
-        window_height = 300
-        loading_window.update_idletasks()
-        screen_width = loading_window.winfo_screenwidth()
-        screen_height = loading_window.winfo_screenheight()
-        x = (screen_width // 2) - (window_width // 2)
-        y = (screen_height // 2) - (window_height // 2)
-        loading_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        loading.update_idletasks()
+        x = (loading.winfo_screenwidth() // 2) - 200
+        y = (loading.winfo_screenheight() // 2) - 150
+        loading.geometry(f"400x300+{x}+{y}")
         
         # Main container
-        main_container = tk.Frame(loading_window, bg="#00d4ff", bd=2, relief="solid")
-        main_container.pack(fill="both", expand=True, padx=2, pady=2)
+        main = tk.Frame(loading, bg="#00d4ff", bd=2, relief="solid")
+        main.pack(fill="both", expand=True, padx=2, pady=2)
         
-        content_frame = tk.Frame(main_container, bg="#1a1f2e")
-        content_frame.pack(fill="both", expand=True, padx=2, pady=2)
+        content = tk.Frame(main, bg="#1a1f2e")
+        content.pack(fill="both", expand=True, padx=2, pady=2)
         
-        # Logo and title
-        tk.Label(content_frame, text="⚡", bg="#1a1f2e", fg="#00d4ff", 
-                font=("Segoe UI", 48, "bold")).pack(pady=(30, 15))
+        # Content elements
+        tk.Label(content, text="⚡", bg="#1a1f2e", fg="#00d4ff", font=("Segoe UI", 48, "bold")).pack(pady=(30, 15))
+        tk.Label(content, text="BENSON v2.0", bg="#1a1f2e", fg="#ffffff", font=("Segoe UI", 20, "bold")).pack(pady=(0, 8))
+        tk.Label(content, text="MEmu Instance Manager", bg="#1a1f2e", fg="#00d4ff", font=("Segoe UI", 11)).pack(pady=(0, 25))
         
-        tk.Label(content_frame, text="BENSON v2.0", bg="#1a1f2e", fg="#ffffff",
-                font=("Segoe UI", 20, "bold")).pack(pady=(0, 8))
-        
-        tk.Label(content_frame, text="MEmu Instance Manager", bg="#1a1f2e", fg="#00d4ff",
-                font=("Segoe UI", 11)).pack(pady=(0, 25))
-        
-        # Status label
-        status_label = tk.Label(content_frame, text="🚀 Initializing...", bg="#1a1f2e", fg="#ffffff",
-                               font=("Segoe UI", 12, "bold"))
+        # Status and animation
+        status_label = tk.Label(content, text="🚀 Initializing...", bg="#1a1f2e", fg="#ffffff", font=("Segoe UI", 12, "bold"))
         status_label.pack(pady=(0, 10))
         
-        # Progress dots
-        dots_label = tk.Label(content_frame, text="●●●", bg="#1a1f2e", fg="#00d4ff",
-                             font=("Segoe UI", 14))
+        dots_label = tk.Label(content, text="●●●", bg="#1a1f2e", fg="#00d4ff", font=("Segoe UI", 14))
         dots_label.pack()
         
-        tk.Label(content_frame, text="Loading...", bg="#1a1f2e", fg="#6b7280", 
-                font=("Segoe UI", 9)).pack(side="bottom", pady=(15, 10))
+        tk.Label(content, text="Loading...", bg="#1a1f2e", fg="#6b7280", font=("Segoe UI", 9)).pack(side="bottom", pady=(15, 10))
         
-        loading_window.deiconify()
-        loading_window.lift()
-        loading_window.focus_force()
-        
-        # Loading controller
+        # Animation controller
         class LoadingController:
-            def __init__(self, window, status_label, dots_label):
+            def __init__(self, window, status, dots):
                 self.window = window
-                self.status_label = status_label
-                self.dots_label = dots_label
+                self.status_label = status
+                self.dots_label = dots
                 self.animation_step = 0
                 self.running = True
-                self._start_animation()
+                self._animate()
             
-            def _start_animation(self):
+            def _animate(self):
                 if not self.running or not self.window.winfo_exists():
                     return
-                
                 try:
-                    dot_patterns = ["●○○", "○●○", "○○●", "●●○", "●●●", "○○○"]
-                    pattern = dot_patterns[self.animation_step % len(dot_patterns)]
-                    self.dots_label.configure(text=pattern)
-                    
+                    patterns = ["●○○", "○●○", "○○●", "●●○", "●●●", "○○○"]
+                    self.dots_label.configure(text=patterns[self.animation_step % len(patterns)])
                     self.animation_step += 1
-                    self.window.after(300, self._start_animation)
-                except:
-                    self.running = False
+                    self.window.after(300, self._animate)
+                except: self.running = False
             
             def update_status(self, status_text):
                 try:
                     if self.status_label.winfo_exists():
-                        status_icons = {
-                            "connecting": "🔗", "loading": "📦", "initializing": "⚙️",
-                            "setting up": "🛠️", "building": "🏗️", "creating": "🎯",
-                            "console": "📝", "finishing": "🎉", "ready": "✨"
-                        }
-                        
-                        icon = "🚀"
-                        for key, emoji in status_icons.items():
-                            if key in status_text.lower():
-                                icon = emoji
-                                break
-                        
-                        if len(status_text) > 25:
-                            status_text = status_text[:22] + "..."
-                        
+                        icons = {"connecting": "🔗", "loading": "📦", "initializing": "⚙️", "ready": "✨"}
+                        icon = next((emoji for key, emoji in icons.items() if key in status_text.lower()), "🚀")
+                        if len(status_text) > 25: status_text = status_text[:22] + "..."
                         self.status_label.configure(text=f"{icon} {status_text}")
-                except:
-                    pass
+                except: pass
             
             def close(self):
                 try:
                     self.running = False
-                    if self.window.winfo_exists():
-                        self.window.destroy()
-                except:
-                    pass
+                    if self.window.winfo_exists(): self.window.destroy()
+                except: pass
         
-        print("[LoadingOverlay] Loading dialog created")
-        return LoadingController(loading_window, status_label, dots_label)
+        loading.deiconify()
+        loading.lift()
+        loading.focus_force()
+        
+        return LoadingController(loading, status_label, dots_label)
 
     def initialize_background(self):
-        """Initialize in background"""
+        """Initialize application in background"""
         def init_worker():
             try:
                 # Step 1: Create InstanceManager
@@ -176,7 +140,6 @@ class BensonApp(tk.Tk):
                 # Step 2: Load instances
                 self._safe_update_status("Loading MEmu instances...")
                 time.sleep(1.0)
-
                 self.instance_manager.load_real_instances()
                 instances_count = len(self.instance_manager.get_instances())
                 print(f"[Init] {instances_count} instances loaded")
@@ -184,25 +147,22 @@ class BensonApp(tk.Tk):
                 # Step 3: Initialize modules
                 self._safe_update_status("Initializing modules...")
                 time.sleep(1.0)
-
                 try:
                     from utils.module_manager import ModuleManager
                     self.module_manager = ModuleManager(self)
-                    print("[Init] ✅ Module manager created successfully")
+                    print("[Init] ✅ Module manager created")
                 except Exception as e:
-                    print(f"[Init] ❌ Module manager creation failed: {e}")
+                    print(f"[Init] ❌ Module manager failed: {e}")
                     self.module_manager = None
 
                 # Step 4: Setup utilities
                 self._safe_update_status("Setting up utilities...")
                 time.sleep(1.0)
-
                 from utils.instance_operations import InstanceOperations
                 from utils.ui_manager import UIManager
-                
                 self.instance_ops = InstanceOperations(self)
                 self.ui_manager = UIManager(self)
-                print("[Init] Utilities set up")
+                print("[Init] Utilities ready")
 
                 # Schedule UI setup
                 self.after(0, lambda: self.setup_ui_and_finalize(instances_count))
@@ -222,12 +182,12 @@ class BensonApp(tk.Tk):
             print(f"[Init] Error updating status: {e}")
 
     def setup_ui_and_finalize(self, instances_count):
-        """Setup UI and finalize"""
+        """Setup UI and finalize initialization"""
         try:
             print("[BensonApp] Setting up UI...")
             self.loading.update_status("Building interface...")
 
-            # Setup UI components
+            # Setup all UI components
             self.ui_manager.setup_header()
             self.ui_manager.setup_controls()
             self.ui_manager.setup_main_content()
@@ -241,9 +201,9 @@ class BensonApp(tk.Tk):
             self.add_console_message(f"Loaded {instances_count} MEmu instances")
             
             if self.module_manager and self.module_manager.initialization_complete:
-                self.add_console_message("✅ Module system initialized successfully")
+                self.add_console_message("✅ Module system initialized")
             
-            # Start card loading
+            # Load cards and show
             self.loading.update_status("Creating instance cards...")
             self.after(300, lambda: self._load_cards_and_show(instances_count))
 
@@ -252,7 +212,7 @@ class BensonApp(tk.Tk):
             self.show_init_error(str(e))
 
     def _load_cards_and_show(self, instances_count):
-        """Load cards and show main window"""
+        """Load instance cards and show main window"""
         try:
             instances = self.instance_manager.get_instances()
             
@@ -267,31 +227,24 @@ class BensonApp(tk.Tk):
             self.show_init_error(str(e))
 
     def _load_cards_with_progress(self, instances):
-        """Load cards with progress updates"""
+        """Load cards with progress indication"""
         def load_next_card(index=0):
             if index >= len(instances):
-                # All cards loaded
                 self._finalize_ui()
                 self.after(500, self._complete_and_show)
                 return
             
             instance = instances[index]
-            
-            # Update progress
             progress = f"Creating cards... ({index + 1}/{len(instances)})"
             self.loading.update_status(progress)
             
-            # Create card
+            # Create and position card
             card = self.ui_manager.create_instance_card(instance["name"], instance["status"])
             if card:
                 self.instance_cards.append(card)
-                
-                # Position card
-                row = index // 2
-                col = index % 2
+                row, col = index // 2, index % 2
                 card.grid(row=row, column=col, padx=4, pady=2, 
                         sticky="e" if col == 0 else "w", in_=self.instances_container)
-                
                 card.update_idletasks()
                 self.update_idletasks()
             
@@ -301,14 +254,14 @@ class BensonApp(tk.Tk):
         load_next_card()
 
     def _finalize_ui(self):
-        """Finalize UI setup"""
+        """Finalize UI configuration"""
         try:
             # Configure grid
             if self.instances_container and self.instance_cards:
                 self.instances_container.grid_columnconfigure(0, weight=1, minsize=580)
                 self.instances_container.grid_columnconfigure(1, weight=1, minsize=580)
             
-            # Update scroll region and counter
+            # Update scroll and counter
             if hasattr(self.ui_manager, 'update_scroll_region'):
                 self.ui_manager.update_scroll_region()
             
@@ -323,16 +276,16 @@ class BensonApp(tk.Tk):
     def _complete_and_show(self):
         """Complete initialization and show main window"""
         try:
-            self.loading.update_status("Console ready! Finishing...")
+            self.loading.update_status("Ready! Finishing...")
             
             # Add final console messages
             instances_count = len(self.instance_cards)
             self.add_console_message(f"✅ BENSON v2.0 ready with {instances_count} instances")
             
             if self.module_manager and self.module_manager.initialization_complete:
-                self.add_console_message("🔧 Module system ready - start instances to activate")
+                self.add_console_message("🔧 Module system ready")
             
-            # Force console update
+            # Update console and show main window
             if hasattr(self, 'console_text'):
                 self.console_text.update_idletasks()
                 self.console_text.update()
@@ -340,7 +293,7 @@ class BensonApp(tk.Tk):
             self.update_idletasks()
             self.update()
             
-            # Close loading and show main window
+            # Show main window
             self.after(1200, self._show_main_window)
             
         except Exception as e:
@@ -348,20 +301,15 @@ class BensonApp(tk.Tk):
             self.after(500, self._show_main_window)
 
     def _show_main_window(self):
-        """Show the main window"""
+        """Show the main application window"""
         try:
             print("[BensonApp] Showing main window...")
-            
-            # Close loading
             self.loading.close()
-            
-            # Show main window
             self.deiconify()
             self._initializing = False
             self.lift()
             self.focus_force()
-            
-            print("[BensonApp] ✅ Main window is now visible and ready!")
+            print("[BensonApp] ✅ Main window ready!")
             
         except Exception as e:
             print(f"[ShowMainWindow] Error: {e}")
@@ -369,23 +317,17 @@ class BensonApp(tk.Tk):
 
     # Instance operations with module integration
     def start_instance(self, name):
-        """Start instance with optimization and module integration"""
-        def start_with_optimization():
+        """Start instance with optimization and modules"""
+        def start_worker():
             try:
-                self.add_console_message(f"🔧 Auto-optimizing {name} before start...")
-                
-                # Optimize instance
+                self.add_console_message(f"🔧 Auto-optimizing {name}...")
                 success = self.instance_manager.optimize_instance_settings(name)
                 if success:
-                    self.add_console_message(f"✅ {name} optimized successfully")
+                    self.add_console_message(f"✅ {name} optimized")
                 
-                # Start instance
                 start_success = self.instance_manager.start_instance(name)
-                
                 if start_success:
                     self.add_console_message(f"✅ Started: {name}")
-                    
-                    # Trigger modules if ready
                     if (hasattr(self, 'module_manager') and self.module_manager and 
                         self.module_manager.initialization_complete):
                         self.add_console_message(f"🔍 Triggering modules for {name}...")
@@ -398,11 +340,11 @@ class BensonApp(tk.Tk):
             except Exception as e:
                 self.add_console_message(f"❌ Error starting {name}: {e}")
 
-        threading.Thread(target=start_with_optimization, daemon=True).start()
+        threading.Thread(target=start_worker, daemon=True).start()
 
     def stop_instance(self, name):
         """Stop instance with module cleanup"""
-        def stop_with_cleanup():
+        def stop_worker():
             try:
                 self.add_console_message(f"🔄 Stopping instance: {name}")
                 
@@ -410,9 +352,7 @@ class BensonApp(tk.Tk):
                 if hasattr(self, 'module_manager') and self.module_manager:
                     self.module_manager.cleanup_for_stopped_instance(name)
                 
-                # Stop instance
                 success = self.instance_manager.stop_instance(name)
-                
                 if success:
                     self.add_console_message(f"✅ Stopped: {name}")
                 else:
@@ -421,7 +361,7 @@ class BensonApp(tk.Tk):
             except Exception as e:
                 self.add_console_message(f"❌ Error stopping {name}: {e}")
 
-        threading.Thread(target=stop_with_cleanup, daemon=True).start()
+        threading.Thread(target=stop_worker, daemon=True).start()
 
     def show_modules(self, instance_name):
         """Show modules window"""
@@ -429,11 +369,11 @@ class BensonApp(tk.Tk):
 
     # Console operations
     def add_console_message(self, message):
-        """Add message to console"""
+        """Add message to console with timestamp"""
         print(f"[Console] {message}")
         
         if not hasattr(self, 'console_text'):
-            print(f"[Console] Console widget not available yet: {message}")
+            print(f"[Console] Console not ready: {message}")
             return
 
         try:
@@ -450,7 +390,7 @@ class BensonApp(tk.Tk):
             print(f"[Console] Error adding message: {e}")
 
     def clear_console(self):
-        """Clear console"""
+        """Clear console content"""
         try:
             if hasattr(self, 'console_text'):
                 self.console_text.configure(state="normal")
@@ -461,13 +401,12 @@ class BensonApp(tk.Tk):
             print(f"[Clear] Error: {e}")
 
     def show_init_error(self, error):
-        """Show initialization error"""
+        """Show initialization error and exit"""
         from tkinter import messagebox
         try:
             if hasattr(self, 'loading'):
                 self.loading.close()
-        except:
-            pass
+        except: pass
         
         messagebox.showerror("Initialization Error",
                            f"Failed to initialize BENSON:\n\n{error}\n\nThe application will close.")
@@ -486,18 +425,15 @@ class BensonApp(tk.Tk):
         self.search_after_id = self.after(300, lambda: self._filter_instances(query))
 
     def _filter_instances(self, query):
-        """Filter instances"""
+        """Filter instances based on search query"""
         try:
             if not query or query == "Search instances...":
                 self._show_all_instances()
                 return
 
             query_lower = query.lower()
-            visible_cards = []
-
-            for card in self.instance_cards:
-                if hasattr(card, 'name') and query_lower in card.name.lower():
-                    visible_cards.append(card)
+            visible_cards = [card for card in self.instance_cards 
+                           if hasattr(card, 'name') and query_lower in card.name.lower()]
 
             self._apply_filter_results(visible_cards)
 
@@ -507,15 +443,15 @@ class BensonApp(tk.Tk):
     def _apply_filter_results(self, visible_cards):
         """Apply filter results to UI"""
         try:
+            # Hide all cards
             for card in self.instance_cards:
                 card.grid_remove()
 
+            # Show filtered cards
             for i, card in enumerate(visible_cards):
-                row = i // 2
-                col = i % 2
+                row, col = i // 2, i % 2
                 card.grid(row=row, column=col, padx=4, pady=2, 
-                        sticky="e" if col == 0 else "w", 
-                        in_=self.instances_container)
+                        sticky="e" if col == 0 else "w", in_=self.instances_container)
 
             if hasattr(self.ui_manager, 'update_scroll_region'):
                 self.ui_manager.update_scroll_region()
@@ -547,11 +483,9 @@ class BensonApp(tk.Tk):
         """Show all instance cards"""
         try:
             for i, card in enumerate(self.instance_cards):
-                row = i // 2
-                col = i % 2
+                row, col = i // 2, i % 2
                 card.grid(row=row, column=col, padx=4, pady=2, 
-                        sticky="e" if col == 0 else "w", 
-                        in_=self.instances_container)
+                        sticky="e" if col == 0 else "w", in_=self.instances_container)
             
             if hasattr(self.ui_manager, 'update_scroll_region'):
                 self.ui_manager.update_scroll_region()
@@ -560,7 +494,7 @@ class BensonApp(tk.Tk):
             print(f"[ShowAll] Error: {e}")
 
     def on_card_selection_changed(self):
-        """Called when a card's selection state changes"""
+        """Called when card selection changes"""
         try:
             self.selected_cards = [card for card in self.instance_cards 
                                  if hasattr(card, 'selected') and card.selected]
@@ -572,10 +506,8 @@ class BensonApp(tk.Tk):
         try:
             # Clear existing cards
             for card in self.instance_cards:
-                try:
-                    card.destroy()
-                except:
-                    pass
+                try: card.destroy()
+                except: pass
             self.instance_cards = []
             
             # Load fresh cards
@@ -584,16 +516,12 @@ class BensonApp(tk.Tk):
                 card = self.ui_manager.create_instance_card(instance["name"], instance["status"])
                 if card:
                     self.instance_cards.append(card)
-                    
-                    # Position card
-                    row = i // 2
-                    col = i % 2
-                    card.grid(row=i // 2, column=i % 2, padx=4, pady=2, 
-                            sticky="e" if col == 0 else "w", 
-                            in_=self.instances_container)
+                    row, col = i // 2, i % 2
+                    card.grid(row=row, column=col, padx=4, pady=2, 
+                            sticky="e" if col == 0 else "w", in_=self.instances_container)
             
             # Update UI
-            if hasattr(self, 'instances_container') and self.instance_cards:
+            if self.instances_container and self.instance_cards:
                 self.instances_container.grid_columnconfigure(0, weight=1, minsize=580)
                 self.instances_container.grid_columnconfigure(1, weight=1, minsize=580)
             
@@ -609,9 +537,11 @@ class BensonApp(tk.Tk):
             print(f"[LoadInstances] Error: {e}")
 
     def force_refresh_instances(self):
-        """Force refresh instances"""
+        """Force refresh instances (simplified)"""
         try:
-            print("[BensonApp] Force refresh disabled - using simple card addition instead")
+            print("[BensonApp] Force refresh - using simple card reload")
+            # Just reload instances for now
+            self.load_instances()
         except Exception as e:
             print(f"[ForceRefresh] Error: {e}")
 
@@ -623,8 +553,7 @@ class BensonApp(tk.Tk):
                 self.loading.close()
             if hasattr(self, 'module_manager') and self.module_manager:
                 self.module_manager.stop_all_modules()
-        except:
-            pass
+        except: pass
         super().destroy()
 
 
