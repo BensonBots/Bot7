@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - Compact AutoStart Game Module
-Reduced from 500+ lines to ~150 lines with same functionality
+BENSON v2.0 - Template-Only AutoStart Module
+Only uses image detection - no fallback position clicking
 """
 
 import os
@@ -20,7 +20,7 @@ except ImportError:
 
 
 class AutoStartGameModule:
-    """Compact AutoStart with proper module communication"""
+    """Template-only AutoStart - requires proper image templates"""
     
     def __init__(self, instance_name: str, shared_resources, console_callback: Callable = None):
         self.instance_name = instance_name
@@ -44,18 +44,75 @@ class AutoStartGameModule:
         self.retry_delay = 10
         self.game_load_timeout = 90
         
-        # Game detection templates
-        self.MAIN_MENU_INDICATORS = ["game_launcher.png"]
-        self.GAME_WORLD_INDICATORS = ["world.png", "world_icon.png", "town_icon.png", "game_icon.png",
-                                     "home_button.png", "castle.png", "build_button.png", "march_button.png"]
-        self.CLOSE_BUTTONS = ["close_x.png", "close_x2.png", "close_btn.png", "cancel_btn.png", "ok_btn.png"]
-        
-        os.makedirs(self.templates_dir, exist_ok=True)
+        # Setup and validate templates
+        self._setup_and_validate_templates()
         
         # Log initialization once per instance
         if not hasattr(self.__class__, f'_init_logged_{instance_name}'):
             self.log_message(f"✅ AutoStartGame initialized for {instance_name}")
             setattr(self.__class__, f'_init_logged_{instance_name}', True)
+    
+    def _setup_and_validate_templates(self):
+        """Setup templates directory and validate requirements"""
+        os.makedirs(self.templates_dir, exist_ok=True)
+        
+        # Game detection templates
+        self.MAIN_MENU_INDICATORS = ["game_launcher.png", "main_menu.png", "start_game.png", "play_button.png"]
+        self.GAME_WORLD_INDICATORS = ["world.png", "world_icon.png", "town_icon.png", "game_icon.png",
+                                     "home_button.png", "castle.png", "build_button.png", "march_button.png",
+                                     "base_icon.png", "city_icon.png", "village_icon.png"]
+        self.CLOSE_BUTTONS = ["close_x.png", "close_x2.png", "close_btn.png", "cancel_btn.png", "ok_btn.png",
+                              "close_2.png", "close_3.png", "close_4.png", "close_5.png", "x_button.png"]
+        
+        # Check OpenCV availability
+        if not CV2_AVAILABLE:
+            self.log_message("❌ OpenCV not available - AutoStart requires cv2 for image detection")
+            self.is_available = False
+            return
+        
+        # Check for templates
+        available_templates = self._get_available_templates()
+        
+        if not available_templates:
+            self.log_message("❌ No template files found in templates/ directory")
+            self.log_message("📋 AutoStart requires image templates to work properly")
+            self.is_available = False
+            return
+        
+        # Check for essential templates
+        has_menu_template = any(template in available_templates for template in self.MAIN_MENU_INDICATORS)
+        has_world_template = any(template in available_templates for template in self.GAME_WORLD_INDICATORS)
+        
+        if not has_menu_template:
+            self.log_message("⚠️ No main menu templates found - may have difficulty starting games")
+        
+        if not has_world_template:
+            self.log_message("⚠️ No game world templates found - may have difficulty detecting game state")
+        
+        self.is_available = True
+        self.log_message(f"✅ Found {len(available_templates)} template files")
+        
+        # Log available templates for debugging
+        if available_templates:
+            menu_templates = [t for t in available_templates if t in self.MAIN_MENU_INDICATORS]
+            world_templates = [t for t in available_templates if t in self.GAME_WORLD_INDICATORS]
+            close_templates = [t for t in available_templates if t in self.CLOSE_BUTTONS]
+            
+            if menu_templates:
+                self.log_message(f"📋 Menu templates: {', '.join(menu_templates)}")
+            if world_templates:
+                self.log_message(f"🌍 World templates: {', '.join(world_templates)}")
+            if close_templates:
+                self.log_message(f"❌ Close templates: {', '.join(close_templates)}")
+    
+    def _get_available_templates(self) -> list:
+        """Get list of available template files"""
+        try:
+            if not os.path.exists(self.templates_dir):
+                return []
+            return [f for f in os.listdir(self.templates_dir) if f.endswith('.png')]
+        except:
+            return []
     
     def log_message(self, message: str):
         """Log message with timestamp"""
@@ -66,8 +123,14 @@ class AutoStartGameModule:
     
     def start_auto_game(self, instance_name: str = None, max_retries: int = None, 
                        on_complete: Callable = None) -> bool:
-        """Start auto game with completion callback"""
+        """Start auto game with template-only detection"""
         target_instance = instance_name or self.instance_name
+        
+        # Check if AutoStart is available
+        if not self.is_available:
+            self.log_message("❌ AutoStart not available - missing templates or OpenCV")
+            if on_complete: on_complete(False)
+            return False
         
         # Check if recently completed
         if self.game_start_completed and self.last_successful_start:
@@ -143,135 +206,217 @@ class AutoStartGameModule:
             self.log_message(f"⚠️ Could not set shared state: {e}")
     
     def _run_complete_game_start(self, instance_name: str, max_retries: int) -> bool:
-        """Complete game start process"""
+        """Complete game start process using only templates"""
         for attempt in range(1, max_retries + 1):
             self.log_message(f"🔄 Auto start attempt {attempt}/{max_retries}")
             
-            if self._attempt_game_start_complete(instance_name):
-                return True
+            try:
+                if self._attempt_game_start_template_only(instance_name):
+                    return True
+            except Exception as e:
+                self.log_message(f"❌ Attempt {attempt} failed: {e}")
             
             if attempt < max_retries:
                 self.log_message(f"⏳ Waiting {self.retry_delay}s before retry")
                 time.sleep(self.retry_delay)
         
+        self.log_message("❌ All attempts failed - check your templates and game state")
         return False
     
-    def _attempt_game_start_complete(self, instance_name: str) -> bool:
-        """Complete game start attempt"""
+    def _attempt_game_start_template_only(self, instance_name: str) -> bool:
+        """Template-only game start attempt"""
         try:
             instance = self.instance_manager.get_instance(instance_name)
             if not instance:
+                self.log_message(f"❌ Instance {instance_name} not found")
                 return False
             
             screenshot_path = self._take_screenshot(instance['index'])
             if not screenshot_path:
+                self.log_message("❌ Failed to take screenshot")
                 return False
             
             try:
-                # Detect current state
+                # Detect current state using templates
                 game_state = self._detect_game_state(screenshot_path)
                 self.log_message(f"🔍 Detected state: {game_state}")
                 
                 if game_state == "ALREADY_IN_GAME":
                     return self._verify_game_world_stable(instance['index'])
                 elif game_state == "MAIN_MENU":
-                    return self._start_from_main_menu(screenshot_path, instance['index'])
+                    return self._start_from_main_menu_template_only(screenshot_path, instance['index'])
+                elif game_state == "UNKNOWN_STATE":
+                    return self._handle_unknown_state_template_only(screenshot_path, instance['index'])
                 else:
-                    return self._handle_unknown_state(screenshot_path, instance['index'])
+                    self.log_message(f"❌ Unhandled game state: {game_state}")
+                    return False
                     
             finally:
                 self._cleanup_screenshot(screenshot_path)
                 
         except Exception as e:
-            self.log_message(f"❌ Error in game start attempt: {e}")
+            self.log_message(f"❌ Error in template-only game start: {e}")
             return False
     
     def _detect_game_state(self, screenshot_path: str) -> str:
-        """Detect current game state"""
+        """Detect current game state using only templates"""
         try:
             if self._find_any_template(screenshot_path, self.GAME_WORLD_INDICATORS):
                 return "ALREADY_IN_GAME"
             if self._find_any_template(screenshot_path, self.MAIN_MENU_INDICATORS):
                 return "MAIN_MENU"
             return "UNKNOWN_STATE"
-        except:
+        except Exception as e:
+            self.log_message(f"❌ Error detecting game state: {e}")
             return "UNKNOWN_STATE"
     
-    def _start_from_main_menu(self, screenshot_path: str, instance_index: int) -> bool:
-        """Start game from main menu"""
+    def _start_from_main_menu_template_only(self, screenshot_path: str, instance_index: int) -> bool:
+        """Start game from main menu using only templates"""
         try:
-            self.log_message(f"🎮 Starting game from main menu")
+            self.log_message(f"🎮 Starting game from main menu using templates")
             
-            if self._click_template(screenshot_path, "game_launcher.png", instance_index):
-                self.log_message(f"✅ Clicked game launcher")
-                return self._wait_for_game_load(instance_index)
+            # Try to find and click game launcher template
+            for template in self.MAIN_MENU_INDICATORS:
+                if self._click_template(screenshot_path, template, instance_index):
+                    self.log_message(f"✅ Clicked game launcher using template: {template}")
+                    return self._wait_for_game_load_template_only(instance_index)
             
+            self.log_message("❌ No main menu templates matched current screen")
             return False
             
         except Exception as e:
             self.log_message(f"❌ Error starting from main menu: {e}")
             return False
     
-    def _wait_for_game_load(self, instance_index: int) -> bool:
-        """Wait for game to load"""
-        self.log_message(f"⏳ Waiting for game to load (timeout: {self.game_load_timeout}s)")
+    def _wait_for_game_load_template_only(self, instance_index: int) -> bool:
+        """Wait for game to load using only template detection"""
+        self.log_message(f"⏳ Waiting for game to load using templates (timeout: {self.game_load_timeout}s)")
         
         start_time = time.time()
         check_count = 0
+        last_state = None
         
         while (time.time() - start_time) < self.game_load_timeout:
             check_count += 1
             
+            # Always take a FRESH screenshot for each check
             screenshot_path = self._take_screenshot(instance_index)
             if not screenshot_path:
+                self.log_message("⚠️ Failed to take screenshot, retrying...")
                 time.sleep(3)
                 continue
             
             try:
                 state = self._detect_game_state(screenshot_path)
                 
+                # Only log state changes to reduce spam
+                if state != last_state:
+                    self.log_message(f"🔍 Game state: {state}")
+                    last_state = state
+                
                 if state == "ALREADY_IN_GAME":
                     if self._verify_game_world_stable(instance_index):
-                        self.log_message(f"✅ Game loaded successfully")
+                        self.log_message(f"✅ Game loaded successfully (detected via templates)")
                         return True
-                elif state == "UNKNOWN_STATE" and check_count % 3 == 0:
-                    self._try_close_dialogs(screenshot_path, instance_index)
+                elif state == "UNKNOWN_STATE":
+                    # Try to close dialogs with the current fresh screenshot
+                    dialogs_found = self._check_and_close_dialogs_fresh(screenshot_path, instance_index)
+                    if dialogs_found:
+                        self.log_message("⏳ Closed dialogs, continuing to wait for game load...")
                 
             finally:
                 self._cleanup_screenshot(screenshot_path)
             
             time.sleep(3)
         
+        self.log_message("❌ Game load timeout - could not detect game world with available templates")
         return False
     
-    def _handle_unknown_state(self, screenshot_path: str, instance_index: int) -> bool:
-        """Handle unknown state by closing dialogs"""
-        self.log_message(f"❓ Unknown state - trying to close dialogs")
+    def _check_and_close_dialogs_fresh(self, screenshot_path: str, instance_index: int) -> bool:
+        """Check for and close dialogs using current fresh screenshot"""
+        dialogs_found = False
         
-        if self._try_close_dialogs(screenshot_path, instance_index):
+        # Check each close button template against current screenshot
+        for close_button in self.CLOSE_BUTTONS:
+            if self._find_template_only(screenshot_path, close_button):
+                self.log_message(f"🔍 Found dialog close button: {close_button}")
+                
+                if self._click_template(screenshot_path, close_button, instance_index):
+                    self.log_message(f"❌ Closed dialog using template: {close_button}")
+                    dialogs_found = True
+                    time.sleep(1.5)  # Wait for dialog animation to complete
+                    break  # Only close one dialog at a time, let next iteration handle more
+                else:
+                    self.log_message(f"⚠️ Failed to click close button: {close_button}")
+        
+        if not dialogs_found:
+            self.log_message("ℹ️ No dialog close buttons detected in current screenshot")
+        
+        return dialogs_found
+    
+    def _handle_unknown_state_template_only(self, screenshot_path: str, instance_index: int) -> bool:
+        """Handle unknown state using only templates"""
+        self.log_message(f"❓ Unknown state - attempting to close dialogs with templates")
+        
+        # Try to close dialogs with current screenshot
+        if self._check_and_close_dialogs_fresh(screenshot_path, instance_index):
+            # Wait for dialogs to close, then take a completely fresh screenshot
             time.sleep(3)
+            
             new_screenshot = self._take_screenshot(instance_index)
             if new_screenshot:
                 try:
-                    if self._detect_game_state(new_screenshot) == "ALREADY_IN_GAME":
+                    new_state = self._detect_game_state(new_screenshot)
+                    self.log_message(f"🔍 State after closing dialogs: {new_state}")
+                    
+                    if new_state == "ALREADY_IN_GAME":
                         return self._verify_game_world_stable(instance_index)
+                    elif new_state == "MAIN_MENU":
+                        return self._start_from_main_menu_template_only(new_screenshot, instance_index)
+                    else:
+                        self.log_message(f"⚠️ Still in unknown state after closing dialogs: {new_state}")
+                        
                 finally:
                     self._cleanup_screenshot(new_screenshot)
         
+        self.log_message("❌ Could not resolve unknown state with available templates")
         return False
     
-    def _try_close_dialogs(self, screenshot_path: str, instance_index: int) -> bool:
-        """Try to close visible dialogs"""
+    def _try_close_dialogs_template_only(self, screenshot_path: str, instance_index: int) -> bool:
+        """Try to close visible dialogs using only templates"""
+        dialogs_closed = False
+        
         for close_button in self.CLOSE_BUTTONS:
             if self._find_template_only(screenshot_path, close_button):
                 if self._click_template(screenshot_path, close_button, instance_index):
-                    self.log_message(f"❌ Closed dialog with {close_button}")
-                    return True
-        return False
+                    self.log_message(f"❌ Closed dialog using template: {close_button}")
+                    dialogs_closed = True
+                    
+                    # Wait for dialog to close and take NEW screenshot
+                    time.sleep(2)
+                    new_screenshot = self._take_screenshot(instance_index)
+                    
+                    if new_screenshot:
+                        try:
+                            # Update screenshot_path to the new one for next iteration
+                            self._cleanup_screenshot(screenshot_path)
+                            screenshot_path = new_screenshot
+                            self.log_message("📸 Took fresh screenshot after closing dialog")
+                        except Exception as e:
+                            self.log_message(f"⚠️ Error updating screenshot: {e}")
+                            self._cleanup_screenshot(new_screenshot)
+                    else:
+                        self.log_message("⚠️ Could not take fresh screenshot after dialog close")
+                        break  # Stop trying if we can't get new screenshots
+        
+        if not dialogs_closed:
+            self.log_message("ℹ️ No dialog close buttons detected")
+        
+        return dialogs_closed
     
     def _verify_game_world_stable(self, instance_index: int) -> bool:
-        """Verify game world is stable"""
-        self.log_message(f"🔍 Verifying game world stability...")
+        """Verify game world is stable using templates"""
+        self.log_message(f"🔍 Verifying game world stability using templates...")
         
         stable_checks = 0
         for check in range(3):
@@ -282,19 +427,22 @@ class AutoStartGameModule:
                 try:
                     if self._find_any_template(screenshot_path, self.GAME_WORLD_INDICATORS):
                         stable_checks += 1
-                        self.log_message(f"✅ Stability check {check + 1}/3: world found")
+                        self.log_message(f"✅ Stability check {check + 1}/3: game world detected")
                     else:
-                        self.log_message(f"❌ Stability check {check + 1}/3: no world")
+                        self.log_message(f"❌ Stability check {check + 1}/3: no game world detected")
                 finally:
                     self._cleanup_screenshot(screenshot_path)
         
         is_stable = stable_checks >= 2
         if is_stable:
             self.log_message(f"✅ Game world confirmed stable ({stable_checks}/3 checks)")
+        else:
+            self.log_message(f"❌ Game world unstable ({stable_checks}/3 checks) - check your world templates")
+        
         return is_stable
     
     def _is_game_already_running(self) -> bool:
-        """Quick check if game is running"""
+        """Check if game is already running using templates"""
         try:
             instance = self.instance_manager.get_instance(self.instance_name)
             if not instance:
@@ -309,7 +457,8 @@ class AutoStartGameModule:
             finally:
                 self._cleanup_screenshot(screenshot_path)
                 
-        except:
+        except Exception as e:
+            self.log_message(f"❌ Error checking if game running: {e}")
             return False
     
     def _verify_stable_game_state(self) -> bool:
@@ -325,12 +474,10 @@ class AutoStartGameModule:
     # Template matching methods
     def _find_any_template(self, screenshot_path: str, template_names: list) -> bool:
         """Find any template from list"""
-        if not CV2_AVAILABLE:
-            return False
-        
         try:
             screenshot = cv2.imread(screenshot_path)
             if screenshot is None:
+                self.log_message(f"❌ Could not load screenshot: {screenshot_path}")
                 return False
             
             for template_name in template_names:
@@ -340,28 +487,28 @@ class AutoStartGameModule:
                 
                 template = cv2.imread(template_path)
                 if template is None:
+                    self.log_message(f"⚠️ Could not load template: {template_name}")
                     continue
                 
                 result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
                 _, max_val, _, _ = cv2.minMaxLoc(result)
                 
                 if max_val >= self.confidence_threshold:
+                    self.log_message(f"✅ Template match: {template_name} (confidence: {max_val:.3f})")
                     return True
             
             return False
             
-        except:
+        except Exception as e:
+            self.log_message(f"❌ Error in template matching: {e}")
             return False
     
     def _find_template_only(self, screenshot_path: str, template_name: str) -> bool:
-        """Find template without clicking"""
+        """Find specific template without clicking"""
         return self._find_any_template(screenshot_path, [template_name])
     
     def _click_template(self, screenshot_path: str, template_name: str, instance_index: int) -> bool:
         """Click on template if found"""
-        if not CV2_AVAILABLE:
-            return False
-        
         try:
             template_path = os.path.join(self.templates_dir, template_name)
             if not os.path.exists(template_path):
@@ -381,13 +528,13 @@ class AutoStartGameModule:
                 click_x = max_loc[0] + template_w // 2
                 click_y = max_loc[1] + template_h // 2
                 
-                self.log_message(f"👆 Clicked position ({click_x}, {click_y})")
+                self.log_message(f"👆 Clicking template {template_name} at ({click_x}, {click_y}) confidence: {max_val:.3f}")
                 return self._click_position(instance_index, click_x, click_y)
             
             return False
             
         except Exception as e:
-            self.log_message(f"❌ Error clicking template: {e}")
+            self.log_message(f"❌ Error clicking template {template_name}: {e}")
             return False
     
     def _click_position(self, instance_index: int, x: int, y: int) -> bool:
@@ -396,8 +543,15 @@ class AutoStartGameModule:
             memuc_path = self.instance_manager.MEMUC_PATH
             tap_cmd = [memuc_path, "adb", "-i", str(instance_index), "shell", "input", "tap", str(x), str(y)]
             result = subprocess.run(tap_cmd, capture_output=True, text=True, timeout=10)
-            return result.returncode == 0
-        except:
+            
+            if result.returncode == 0:
+                return True
+            else:
+                self.log_message(f"❌ ADB tap failed: {result.stderr}")
+                return False
+                
+        except Exception as e:
+            self.log_message(f"❌ Error clicking position: {e}")
             return False
     
     def _take_screenshot(self, instance_index: int) -> Optional[str]:
@@ -415,6 +569,7 @@ class AutoStartGameModule:
             capture_result = subprocess.run(capture_cmd, capture_output=True, text=True, timeout=15)
             
             if capture_result.returncode != 0:
+                self.log_message(f"❌ Screenshot capture failed: {capture_result.stderr}")
                 return None
             
             time.sleep(0.5)
@@ -423,6 +578,7 @@ class AutoStartGameModule:
             pull_result = subprocess.run(pull_cmd, capture_output=True, text=True, timeout=15)
             
             if pull_result.returncode != 0:
+                self.log_message(f"❌ Screenshot pull failed: {pull_result.stderr}")
                 return None
             
             # Cleanup device
@@ -431,10 +587,12 @@ class AutoStartGameModule:
             
             if os.path.exists(local_screenshot) and os.path.getsize(local_screenshot) > 10000:
                 return local_screenshot
+            else:
+                self.log_message(f"❌ Invalid screenshot file")
+                return None
             
-            return None
-            
-        except:
+        except Exception as e:
+            self.log_message(f"❌ Screenshot error: {e}")
             return None
     
     def _cleanup_screenshot(self, screenshot_path: str):
@@ -451,7 +609,7 @@ class AutoStartGameModule:
         self.game_start_completed = False
         self.last_successful_start = None
         self._set_game_accessible_state(False)
-        self.log_message(f"🧹 Cleaned up AutoStartGame")
+        self.log_message(f"🧹 Cleaned up AutoStartGame for stopped instance")
     
     def is_game_accessible(self) -> bool:
         """Check if game is accessible"""
@@ -460,6 +618,9 @@ class AutoStartGameModule:
     def execute_cycle(self) -> bool:
         """Execute cycle for module manager"""
         try:
+            if not self.is_available:
+                return False
+            
             instance = self.instance_manager.get_instance(self.instance_name)
             if not instance or instance["status"] != "Running":
                 return True

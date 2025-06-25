@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - Compact Instance Manager
-Reduced from 300+ lines to ~150 lines while keeping all functionality
+BENSON v2.0 - Silent Instance Manager
+Checks every second but only logs actual changes
 """
 
 import subprocess
@@ -11,7 +11,7 @@ import threading
 
 
 class InstanceManager:
-    """Compact instance manager with MEmu operations"""
+    """Instance manager with silent frequent monitoring"""
 
     def __init__(self):
         self.MEMUC_PATH = r"C:\Program Files\Microvirt\MEmu\memuc.exe"
@@ -21,33 +21,109 @@ class InstanceManager:
         
         self.instances = []
         self.app = None
+        self.last_instance_states = {}  # Track previous states to detect changes
+        self.shared_state = {}  # Add shared state for module communication
+        self.silent_mode = True  # Enable silent monitoring
+        self.last_error_log_time = 0  # Prevent error spam
+        
         print(f"[InstanceManager] Initialized with MEmu at: {self.MEMUC_PATH}")
 
-    def load_real_instances(self):
-        """Load instances from MEmu"""
+    def load_real_instances(self, force_refresh=False, log_result=True):
+        """Load instances from MEmu with configurable logging"""
         try:
-            print("[InstanceManager] Loading MEmu instances...")
             start_time = time.time()
             
             result = subprocess.run([self.MEMUC_PATH, "listvms"], capture_output=True, text=True, timeout=30)
             
-            print(f"[InstanceManager] memuc listvms completed in {time.time() - start_time:.2f}s")
+            elapsed_time = time.time() - start_time
             
             if result.returncode != 0:
-                print(f"[InstanceManager] Error: {result.stderr}")
+                # Only log errors occasionally to avoid spam
+                current_time = time.time()
+                if (current_time - self.last_error_log_time) > 60:  # Every minute max
+                    print(f"[InstanceManager] Error: {result.stderr}")
+                    self.last_error_log_time = current_time
                 return
 
-            self.instances = []
+            # Parse instances and detect changes
+            new_instances = []
             for line in result.stdout.strip().split('\n'):
                 if line.strip():
                     instance = self._parse_instance_line(line)
                     if instance:
-                        self.instances.append(instance)
+                        new_instances.append(instance)
             
-            print(f"[InstanceManager] Loaded {len(self.instances)} instances")
+            # Detect and log only actual changes
+            changes_detected = self._detect_and_log_changes(new_instances, log_result)
+            
+            # Update instances list
+            self.instances = new_instances
+            
+            # Log performance only if slow or forced
+            if force_refresh and log_result:
+                print(f"[InstanceManager] memuc listvms completed in {elapsed_time:.2f}s")
+            elif elapsed_time > 3.0:  # Only log if unusually slow
+                print(f"[InstanceManager] ⚠️ Slow response: {elapsed_time:.2f}s")
             
         except Exception as e:
-            print(f"[InstanceManager] Error loading instances: {e}")
+            # Prevent error spam - only log occasionally
+            current_time = time.time()
+            if (current_time - self.last_error_log_time) > 300:  # Every 5 minutes max
+                print(f"[InstanceManager] Error loading instances: {e}")
+                self.last_error_log_time = current_time
+
+    def _detect_and_log_changes(self, new_instances, log_result=True):
+        """Detect changes and log only significant events"""
+        if not log_result:
+            # Update tracking without logging
+            self._update_state_tracking(new_instances)
+            return False
+        
+        changes_detected = False
+        
+        # Create current state map
+        current_states = {inst["name"]: inst["status"] for inst in new_instances}
+        current_names = set(current_states.keys())
+        previous_names = set(self.last_instance_states.keys())
+        
+        # Check for new instances
+        new_names = current_names - previous_names
+        if new_names:
+            for name in new_names:
+                print(f"[InstanceManager] ➕ New instance detected: {name}")
+                changes_detected = True
+        
+        # Check for removed instances
+        removed_names = previous_names - current_names
+        if removed_names:
+            for name in removed_names:
+                print(f"[InstanceManager] ➖ Instance removed: {name}")
+                changes_detected = True
+        
+        # Check for status changes
+        for name in current_names.intersection(previous_names):
+            old_status = self.last_instance_states.get(name)
+            new_status = current_states.get(name)
+            
+            if old_status != new_status:
+                print(f"[InstanceManager] 🔄 {name}: {old_status} → {new_status}")
+                changes_detected = True
+        
+        # Update tracking
+        self.last_instance_states = current_states.copy()
+        
+        # Log summary only if this is the first load
+        if not hasattr(self, '_initial_load_complete'):
+            print(f"[InstanceManager] Loaded {len(new_instances)} instances")
+            self._initial_load_complete = True
+            changes_detected = True
+        
+        return changes_detected
+
+    def _update_state_tracking(self, new_instances):
+        """Update state tracking without logging"""
+        current_states = {inst["name"]: inst["status"] for inst in new_instances}
+        self.last_instance_states = current_states.copy()
 
     def _parse_instance_line(self, line):
         """Parse single instance line from MEmu output"""
@@ -59,10 +135,16 @@ class InstanceManager:
                 status = self._determine_status(parts[2:])
                 
                 instance = {"index": index, "name": name, "status": status}
-                print(f"[InstanceManager] Parsed {name} (index {index}) - Status: {status}")
                 return instance
         except Exception as e:
-            print(f"[InstanceManager] Error parsing line '{line}': {e}")
+            # Only log parsing errors occasionally to avoid spam
+            current_time = time.time()
+            if not hasattr(self, '_last_parse_error_time'):
+                self._last_parse_error_time = 0
+            
+            if (current_time - self._last_parse_error_time) > 300:  # Every 5 minutes
+                print(f"[InstanceManager] Error parsing line: {e}")
+                self._last_parse_error_time = current_time
         return None
 
     def _determine_status(self, status_parts):
@@ -147,9 +229,9 @@ class InstanceManager:
                     subprocess.run([self.MEMUC_PATH, "rename", "-i", str(index), name],
                                  capture_output=True, timeout=10)
                 
-                # Refresh instances
+                # Refresh instances with logging
                 time.sleep(1)
-                self.load_real_instances()
+                self.load_real_instances(force_refresh=True, log_result=True)
                 if self.app:
                     self.app.after(0, self.app.force_refresh_instances)
                     
@@ -171,7 +253,7 @@ class InstanceManager:
         """Delete instance by name"""
         success = self._instance_operation(name, "remove", "Deleting")
         if success:
-            self.load_real_instances()
+            self.load_real_instances(force_refresh=True, log_result=True)
         return success
 
     def clone_instance(self, name):
@@ -197,6 +279,11 @@ class InstanceManager:
             
             if result.stderr and not success:
                 print(f"[InstanceManager] Error: {result.stderr}")
+            
+            # Force immediate refresh with logging after operations
+            if success:
+                time.sleep(1)  # Give MEmu time to update
+                self.load_real_instances(force_refresh=True, log_result=True)
             
             return success
             
@@ -226,15 +313,23 @@ class InstanceManager:
         return self.instances
 
     def refresh_instances(self):
-        """Refresh instance list"""
-        self.load_real_instances()
+        """Refresh instance list with logging"""
+        self.load_real_instances(force_refresh=True, log_result=True)
 
     def update_instance_statuses(self):
-        """Update instance statuses"""
+        """Silent status update for background monitoring"""
         try:
-            self.load_real_instances()
+            # This is called frequently - no logging unless there are changes
+            self.load_real_instances(force_refresh=False, log_result=False)
         except Exception as e:
-            print(f"[InstanceManager] Status update error: {e}")
+            # Minimal error logging for background updates
+            current_time = time.time()
+            if not hasattr(self, '_silent_error_time'):
+                self._silent_error_time = 0
+            
+            if (current_time - self._silent_error_time) > 600:  # Every 10 minutes max
+                print(f"[InstanceManager] Background update error: {e}")
+                self._silent_error_time = current_time
 
     def optimize_instance_settings(self, name, verify=False):
         """Optimize instance settings"""
@@ -246,6 +341,8 @@ class InstanceManager:
             index = instance["index"]
             settings = [("-memory", "2048"), ("-cpu", "2"), ("-resolution", "480x800"), ("-dpi", "240")]
             
+            print(f"[InstanceManager] Optimization completed for {name}")
+            
             success_count = 0
             for param, value in settings:
                 try:
@@ -255,13 +352,89 @@ class InstanceManager:
                         success_count += 1
                     time.sleep(0.5)
                 except Exception as e:
-                    print(f"[InstanceManager] Setting {param} failed: {e}")
+                    # Only log critical optimization failures
+                    if success_count == 0:
+                        print(f"[InstanceManager] Setting {param} failed: {e}")
             
             success = success_count >= len(settings) * 0.75
-            status = "completed" if success else "partially failed"
-            print(f"[InstanceManager] Optimization {status} for {name}")
+            if not success:
+                print(f"[InstanceManager] Optimization partially failed for {name}")
+            
             return success
             
         except Exception as e:
             print(f"[InstanceManager] Optimization error for {name}: {e}")
             return False
+
+    # Shared state methods for module communication
+    def set_game_state(self, instance_name, state_dict):
+        """Set game state for module communication"""
+        try:
+            if not hasattr(self, 'shared_state'):
+                self.shared_state = {}
+            
+            for key, value in state_dict.items():
+                state_key = f"{key}_{instance_name}"
+                self.shared_state[state_key] = value
+                
+        except Exception as e:
+            print(f"[InstanceManager] Error setting game state: {e}")
+
+    def get_game_state(self, instance_name, key):
+        """Get game state for module communication"""
+        try:
+            if not hasattr(self, 'shared_state'):
+                return None
+            
+            state_key = f"{key}_{instance_name}"
+            return self.shared_state.get(state_key)
+            
+        except Exception as e:
+            print(f"[InstanceManager] Error getting game state: {e}")
+            return None
+
+    # Quick status methods without triggering refreshes
+    def get_running_instances(self):
+        """Get list of running instances"""
+        return [inst for inst in self.instances if inst["status"] == "Running"]
+
+    def get_stopped_instances(self):
+        """Get list of stopped instances"""
+        return [inst for inst in self.instances if inst["status"] == "Stopped"]
+
+    def has_running_instances(self):
+        """Quick check if any instances are running"""
+        return any(inst["status"] == "Running" for inst in self.instances)
+
+    def get_instance_count(self):
+        """Get total instance count"""
+        return len(self.instances)
+
+    def get_status_summary(self):
+        """Get status summary without triggering refresh"""
+        running = len([i for i in self.instances if i["status"] == "Running"])
+        stopped = len([i for i in self.instances if i["status"] == "Stopped"])
+        total = len(self.instances)
+        
+        return {
+            "total": total,
+            "running": running,
+            "stopped": stopped,
+            "has_changes": bool(self.last_instance_states)
+        }
+
+    # Debug methods
+    def enable_verbose_logging(self):
+        """Enable verbose logging for debugging"""
+        self.silent_mode = False
+        print("[InstanceManager] Verbose logging enabled")
+
+    def disable_verbose_logging(self):
+        """Disable verbose logging (default)"""
+        self.silent_mode = True
+        print("[InstanceManager] Silent mode enabled")
+
+    def force_status_check_with_logging(self):
+        """Force a status check with full logging"""
+        print("[InstanceManager] Force checking instance statuses...")
+        self.load_real_instances(force_refresh=True, log_result=True)
