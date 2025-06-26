@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - Template-Only AutoStart Module
-Only uses image detection - no fallback position clicking
+BENSON v2.0 - IMPROVED AutoStart Module
+Enhanced popup detection and handling for game offers/dialogs
 """
 
 import os
@@ -20,7 +20,7 @@ except ImportError:
 
 
 class AutoStartGameModule:
-    """Template-only AutoStart - requires proper image templates"""
+    """Template-only AutoStart - IMPROVED VERSION with better popup handling"""
     
     def __init__(self, instance_name: str, shared_resources, console_callback: Callable = None):
         self.instance_name = instance_name
@@ -37,12 +37,18 @@ class AutoStartGameModule:
         self.game_start_completed = False
         self.last_successful_start = None
         
-        # Configuration
+        # Configuration - HIGHER confidence for precise popup detection
         self.templates_dir = "templates"
-        self.confidence_threshold = 0.6
+        self.confidence_threshold = 0.8  # For menu detection
+        self.close_button_confidence = 0.75  # Raised back up for precision
+        self.world_confidence = 0.8  # For world detection
         self.default_max_retries = 3
         self.retry_delay = 10
         self.game_load_timeout = 90
+        
+        # Dialog detection state
+        self.last_dialog_close_time = 0
+        self.dialog_close_cooldown = 3  # Reduced cooldown
         
         # Setup and validate templates
         self._setup_and_validate_templates()
@@ -61,8 +67,13 @@ class AutoStartGameModule:
         self.GAME_WORLD_INDICATORS = ["world.png", "world_icon.png", "town_icon.png", "game_icon.png",
                                      "home_button.png", "castle.png", "build_button.png", "march_button.png",
                                      "base_icon.png", "city_icon.png", "village_icon.png"]
-        self.CLOSE_BUTTONS = ["close_x.png", "close_x2.png", "close_btn.png", "cancel_btn.png", "ok_btn.png",
-                              "close_2.png", "close_3.png", "close_4.png", "close_5.png", "x_button.png"]
+        
+        # ALL close button templates - FIXED close_x6.png (not close_6.png)
+        self.CLOSE_BUTTONS = [
+            "close_x.png", "close_x2.png", "close_x3.png", "close_x4.png", "close_x5.png", "close_x6.png",
+            "close_btn.png", "close_2.png", "close_3.png", "close_4.png", "close_5.png", 
+            "closeadd.png", "closeadd2.png", "close_gather.png", "close_left.png"
+        ]
         
         # Check OpenCV availability
         if not CV2_AVAILABLE:
@@ -92,7 +103,7 @@ class AutoStartGameModule:
         self.is_available = True
         self.log_message(f"✅ Found {len(available_templates)} template files")
         
-        # Log available templates for debugging
+        # Log available templates for debugging - FIXED to show actual available close templates
         if available_templates:
             menu_templates = [t for t in available_templates if t in self.MAIN_MENU_INDICATORS]
             world_templates = [t for t in available_templates if t in self.GAME_WORLD_INDICATORS]
@@ -104,6 +115,15 @@ class AutoStartGameModule:
                 self.log_message(f"🌍 World templates: {', '.join(world_templates)}")
             if close_templates:
                 self.log_message(f"❌ Close templates: {', '.join(close_templates)}")
+            
+            # Debug: show ALL available templates to see what we actually have
+            self.log_message(f"🔍 ALL available templates: {', '.join(sorted(available_templates))}")
+            
+            # Check specifically for close_x6.png (not close_6.png)
+            if "close_x6.png" in available_templates:
+                self.log_message("✅ close_x6.png found in templates!")
+            else:
+                self.log_message("❌ close_x6.png NOT found in templates directory")
     
     def _get_available_templates(self) -> list:
         """Get list of available template files"""
@@ -211,7 +231,7 @@ class AutoStartGameModule:
             self.log_message(f"🔄 Auto start attempt {attempt}/{max_retries}")
             
             try:
-                if self._attempt_game_start_template_only(instance_name):
+                if self._attempt_game_start_improved(instance_name):
                     return True
             except Exception as e:
                 self.log_message(f"❌ Attempt {attempt} failed: {e}")
@@ -223,8 +243,8 @@ class AutoStartGameModule:
         self.log_message("❌ All attempts failed - check your templates and game state")
         return False
     
-    def _attempt_game_start_template_only(self, instance_name: str) -> bool:
-        """Template-only game start attempt"""
+    def _attempt_game_start_improved(self, instance_name: str) -> bool:
+        """Improved game start attempt - launch first, then handle popups"""
         try:
             instance = self.instance_manager.get_instance(instance_name)
             if not instance:
@@ -244,9 +264,10 @@ class AutoStartGameModule:
                 if game_state == "ALREADY_IN_GAME":
                     return self._verify_game_world_stable(instance['index'])
                 elif game_state == "MAIN_MENU":
-                    return self._start_from_main_menu_template_only(screenshot_path, instance['index'])
+                    return self._start_from_main_menu_improved(screenshot_path, instance['index'])
                 elif game_state == "UNKNOWN_STATE":
-                    return self._handle_unknown_state_template_only(screenshot_path, instance['index'])
+                    # ONLY look for popups if we're in unknown state (might be popup blocking)
+                    return self._handle_unknown_state_improved(screenshot_path, instance['index'])
                 else:
                     self.log_message(f"❌ Unhandled game state: {game_state}")
                     return False
@@ -255,31 +276,168 @@ class AutoStartGameModule:
                 self._cleanup_screenshot(screenshot_path)
                 
         except Exception as e:
-            self.log_message(f"❌ Error in template-only game start: {e}")
+            self.log_message(f"❌ Error in game start attempt: {e}")
+            return False
+    
+    def _check_and_clear_popup_precise(self, screenshot_path: str, instance_index: int) -> bool:
+        """Precisely check and clear popups with HIGH confidence only"""
+        try:
+            screenshot = cv2.imread(screenshot_path)
+            if screenshot is None:
+                return False
+            
+            # Check each close button template with HIGH confidence only
+            best_match = None
+            best_confidence = 0
+            
+            for close_button in self.CLOSE_BUTTONS:
+                template_path = os.path.join(self.templates_dir, close_button)
+                if not os.path.exists(template_path):
+                    continue
+                
+                template = cv2.imread(template_path)
+                if template is None:
+                    continue
+                
+                result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, max_loc = cv2.minMaxLoc(result)
+                
+                # Track best match for logging
+                if max_val > best_confidence:
+                    best_confidence = max_val
+                    best_match = (close_button, max_loc, max_val)
+                
+                # ONLY accept HIGH confidence matches to avoid misclicks
+                if max_val >= self.close_button_confidence:
+                    # Calculate click position
+                    template_h, template_w = template.shape[:2]
+                    click_x = max_loc[0] + template_w // 2
+                    click_y = max_loc[1] + template_h // 2
+                    
+                    # Ensure click is within screen bounds
+                    screen_h, screen_w = screenshot.shape[:2]
+                    click_x = max(10, min(click_x, screen_w - 10))
+                    click_y = max(10, min(click_y, screen_h - 10))
+                    
+                    self.log_message(f"🎯 HIGH CONFIDENCE popup close: {close_button} at ({click_x}, {click_y}) confidence: {max_val:.3f}")
+                    
+                    if self._click_position(instance_index, click_x, click_y):
+                        return True
+            
+            # Only log if no popup found (don't spam about low confidence matches)
+            if not best_match or best_confidence < 0.5:
+                return False
+            
+            return False
+            
+        except Exception as e:
+            self.log_message(f"❌ Error in precise popup check: {e}")
+            return False
+    
+    def _find_and_close_popup_at_confidence(self, screenshot_path: str, instance_index: int, confidence: float) -> bool:
+        """Find and close popup at specific confidence level - ONLY use high confidence"""
+        try:
+            screenshot = cv2.imread(screenshot_path)
+            if screenshot is None:
+                return False
+            
+            # Check each close button template with HIGH confidence only
+            for close_button in self.CLOSE_BUTTONS:
+                template_path = os.path.join(self.templates_dir, close_button)
+                if not os.path.exists(template_path):
+                    continue
+                
+                template = cv2.imread(template_path)
+                if template is None:
+                    continue
+                
+                result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, max_loc = cv2.minMaxLoc(result)
+                
+                # ONLY accept very high confidence matches (exact template matches)
+                if max_val >= self.close_button_confidence:
+                    # Calculate click position
+                    template_h, template_w = template.shape[:2]
+                    click_x = max_loc[0] + template_w // 2
+                    click_y = max_loc[1] + template_h // 2
+                    
+                    # Ensure click is within screen bounds
+                    screen_h, screen_w = screenshot.shape[:2]
+                    click_x = max(10, min(click_x, screen_w - 10))
+                    click_y = max(10, min(click_y, screen_h - 10))
+                    
+                    self.log_message(f"🎯 Found EXACT popup close: {close_button} at ({click_x}, {click_y}) confidence: {max_val:.3f}")
+                    
+                    if self._click_position(instance_index, click_x, click_y):
+                        return True
+                else:
+                    # Log near misses for debugging
+                    if max_val >= 0.5:
+                        self.log_message(f"🔍 Close match but too low: {close_button} confidence: {max_val:.3f} (need {self.close_button_confidence})")
+            
+            return False
+            
+        except Exception as e:
+            self.log_message(f"❌ Error in popup detection: {e}")
             return False
     
     def _detect_game_state(self, screenshot_path: str) -> str:
         """Detect current game state using only templates"""
         try:
-            if self._find_any_template(screenshot_path, self.GAME_WORLD_INDICATORS):
+            # Use higher confidence for world detection to avoid false positives
+            if self._find_any_template_with_confidence(screenshot_path, self.GAME_WORLD_INDICATORS, self.world_confidence):
                 return "ALREADY_IN_GAME"
-            if self._find_any_template(screenshot_path, self.MAIN_MENU_INDICATORS):
+            if self._find_any_template_with_confidence(screenshot_path, self.MAIN_MENU_INDICATORS, self.confidence_threshold):
                 return "MAIN_MENU"
             return "UNKNOWN_STATE"
         except Exception as e:
             self.log_message(f"❌ Error detecting game state: {e}")
             return "UNKNOWN_STATE"
     
-    def _start_from_main_menu_template_only(self, screenshot_path: str, instance_index: int) -> bool:
-        """Start game from main menu using only templates"""
+    def _find_any_template_with_confidence(self, screenshot_path: str, template_names: list, confidence: float) -> bool:
+        """Find any template from list with specific confidence"""
         try:
-            self.log_message(f"🎮 Starting game from main menu using templates")
+            screenshot = cv2.imread(screenshot_path)
+            if screenshot is None:
+                return False
+            
+            for template_name in template_names:
+                template_path = os.path.join(self.templates_dir, template_name)
+                if not os.path.exists(template_path):
+                    continue
+                
+                template = cv2.imread(template_path)
+                if template is None:
+                    continue
+                
+                result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, _ = cv2.minMaxLoc(result)
+                
+                if max_val >= confidence:
+                    self.log_message(f"✅ Template match: {template_name} (confidence: {max_val:.3f}) [threshold: {confidence}]")
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            self.log_message(f"❌ Error in template matching: {e}")
+            return False
+    
+    def _start_from_main_menu_improved(self, screenshot_path: str, instance_index: int) -> bool:
+        """Start game from main menu with improved timing"""
+        try:
+            self.log_message(f"🎮 Starting game from main menu")
             
             # Try to find and click game launcher template
             for template in self.MAIN_MENU_INDICATORS:
-                if self._click_template(screenshot_path, template, instance_index):
+                if self._click_template_improved(screenshot_path, template, instance_index):
                     self.log_message(f"✅ Clicked game launcher using template: {template}")
-                    return self._wait_for_game_load_template_only(instance_index)
+                    
+                    # IMPROVED: Wait 5 seconds for game loading to start
+                    self.log_message("⏳ Waiting 5 seconds for game loading to begin...")
+                    time.sleep(5)
+                    
+                    return self._wait_for_game_load_improved(instance_index)
             
             self.log_message("❌ No main menu templates matched current screen")
             return False
@@ -288,135 +446,97 @@ class AutoStartGameModule:
             self.log_message(f"❌ Error starting from main menu: {e}")
             return False
     
-    def _wait_for_game_load_template_only(self, instance_index: int) -> bool:
-        """Wait for game to load using only template detection"""
-        self.log_message(f"⏳ Waiting for game to load using templates (timeout: {self.game_load_timeout}s)")
+    def _wait_for_game_load_improved(self, instance_index: int) -> bool:
+        """Wait for game to load - check every second for popups with high precision"""
+        self.log_message(f"⏳ Monitoring game loading (timeout: {self.game_load_timeout}s, checking every 1s)")
         
         start_time = time.time()
         check_count = 0
         last_state = None
+        consecutive_unknown_states = 0
         
         while (time.time() - start_time) < self.game_load_timeout:
             check_count += 1
             
-            # Always take a FRESH screenshot for each check
             screenshot_path = self._take_screenshot(instance_index)
             if not screenshot_path:
                 self.log_message("⚠️ Failed to take screenshot, retrying...")
-                time.sleep(3)
+                time.sleep(2)
                 continue
             
             try:
                 state = self._detect_game_state(screenshot_path)
                 
-                # Only log state changes to reduce spam
-                if state != last_state:
+                # Only log important state changes
+                if state != last_state and state in ["ALREADY_IN_GAME", "MAIN_MENU"]:
                     self.log_message(f"🔍 Game state: {state}")
-                    last_state = state
+                last_state = state
+                consecutive_unknown_states = 0
                 
                 if state == "ALREADY_IN_GAME":
                     if self._verify_game_world_stable(instance_index):
-                        self.log_message(f"✅ Game loaded successfully (detected via templates)")
+                        self.log_message(f"✅ Game loaded successfully")
                         return True
+                elif state == "MAIN_MENU":
+                    # Still in menu - might need another click
+                    self.log_message("🔄 Still in menu - trying to click launcher again")
+                    if self._click_template_improved(screenshot_path, "game_launcher.png", instance_index):
+                        self.log_message("✅ Clicked launcher again")
+                        # Wait another 5 seconds after re-clicking
+                        time.sleep(5)
                 elif state == "UNKNOWN_STATE":
-                    # Try to close dialogs with the current fresh screenshot
-                    dialogs_found = self._check_and_close_dialogs_fresh(screenshot_path, instance_index)
-                    if dialogs_found:
-                        self.log_message("⏳ Closed dialogs, continuing to wait for game load...")
+                    consecutive_unknown_states += 1
+                    
+                    # Check for popups immediately when unknown state detected
+                    if self._check_and_clear_popup_precise(screenshot_path, instance_index):
+                        self.log_message("✅ Cleared popup - continuing to monitor")
+                        consecutive_unknown_states = 0
+                        # Check again quickly after clearing popup
+                        time.sleep(1)
+                        continue
                 
             finally:
                 self._cleanup_screenshot(screenshot_path)
             
-            time.sleep(3)
+            # IMPROVED: Check every 1 second instead of 4 seconds
+            time.sleep(1)
         
-        self.log_message("❌ Game load timeout - could not detect game world with available templates")
+        self.log_message("❌ Game load timeout")
         return False
     
-    def _check_and_close_dialogs_fresh(self, screenshot_path: str, instance_index: int) -> bool:
-        """Check for and close dialogs using current fresh screenshot"""
-        dialogs_found = False
+    def _handle_unknown_state_improved(self, screenshot_path: str, instance_index: int) -> bool:
+        """Handle unknown state - check for popup with high precision"""
+        self.log_message(f"❓ Unknown state - checking for blocking popup")
         
-        # Check each close button template against current screenshot
-        for close_button in self.CLOSE_BUTTONS:
-            if self._find_template_only(screenshot_path, close_button):
-                self.log_message(f"🔍 Found dialog close button: {close_button}")
-                
-                if self._click_template(screenshot_path, close_button, instance_index):
-                    self.log_message(f"❌ Closed dialog using template: {close_button}")
-                    dialogs_found = True
-                    time.sleep(1.5)  # Wait for dialog animation to complete
-                    break  # Only close one dialog at a time, let next iteration handle more
-                else:
-                    self.log_message(f"⚠️ Failed to click close button: {close_button}")
-        
-        if not dialogs_found:
-            self.log_message("ℹ️ No dialog close buttons detected in current screenshot")
-        
-        return dialogs_found
-    
-    def _handle_unknown_state_template_only(self, screenshot_path: str, instance_index: int) -> bool:
-        """Handle unknown state using only templates"""
-        self.log_message(f"❓ Unknown state - attempting to close dialogs with templates")
-        
-        # Try to close dialogs with current screenshot
-        if self._check_and_close_dialogs_fresh(screenshot_path, instance_index):
-            # Wait for dialogs to close, then take a completely fresh screenshot
-            time.sleep(3)
+        # Use precise popup checking
+        if self._check_and_clear_popup_precise(screenshot_path, instance_index):
+            time.sleep(2)  # Wait for popup to close
             
+            # Check state again after clearing popup
             new_screenshot = self._take_screenshot(instance_index)
             if new_screenshot:
                 try:
                     new_state = self._detect_game_state(new_screenshot)
-                    self.log_message(f"🔍 State after closing dialogs: {new_state}")
+                    self.log_message(f"🔍 State after popup clearing: {new_state}")
                     
                     if new_state == "ALREADY_IN_GAME":
                         return self._verify_game_world_stable(instance_index)
                     elif new_state == "MAIN_MENU":
-                        return self._start_from_main_menu_template_only(new_screenshot, instance_index)
+                        return self._start_from_main_menu_improved(new_screenshot, instance_index)
                     else:
-                        self.log_message(f"⚠️ Still in unknown state after closing dialogs: {new_state}")
+                        self.log_message(f"⚠️ Still unknown after popup clearing: {new_state}")
                         
                 finally:
                     self._cleanup_screenshot(new_screenshot)
+        else:
+            self.log_message("ℹ️ No high-confidence popup found")
         
-        self.log_message("❌ Could not resolve unknown state with available templates")
+        self.log_message("❌ Could not resolve unknown state")
         return False
-    
-    def _try_close_dialogs_template_only(self, screenshot_path: str, instance_index: int) -> bool:
-        """Try to close visible dialogs using only templates"""
-        dialogs_closed = False
-        
-        for close_button in self.CLOSE_BUTTONS:
-            if self._find_template_only(screenshot_path, close_button):
-                if self._click_template(screenshot_path, close_button, instance_index):
-                    self.log_message(f"❌ Closed dialog using template: {close_button}")
-                    dialogs_closed = True
-                    
-                    # Wait for dialog to close and take NEW screenshot
-                    time.sleep(2)
-                    new_screenshot = self._take_screenshot(instance_index)
-                    
-                    if new_screenshot:
-                        try:
-                            # Update screenshot_path to the new one for next iteration
-                            self._cleanup_screenshot(screenshot_path)
-                            screenshot_path = new_screenshot
-                            self.log_message("📸 Took fresh screenshot after closing dialog")
-                        except Exception as e:
-                            self.log_message(f"⚠️ Error updating screenshot: {e}")
-                            self._cleanup_screenshot(new_screenshot)
-                    else:
-                        self.log_message("⚠️ Could not take fresh screenshot after dialog close")
-                        break  # Stop trying if we can't get new screenshots
-        
-        if not dialogs_closed:
-            self.log_message("ℹ️ No dialog close buttons detected")
-        
-        return dialogs_closed
     
     def _verify_game_world_stable(self, instance_index: int) -> bool:
         """Verify game world is stable using templates"""
-        self.log_message(f"🔍 Verifying game world stability using templates...")
+        self.log_message(f"🔍 Verifying game world stability...")
         
         stable_checks = 0
         for check in range(3):
@@ -425,7 +545,7 @@ class AutoStartGameModule:
             screenshot_path = self._take_screenshot(instance_index)
             if screenshot_path:
                 try:
-                    if self._find_any_template(screenshot_path, self.GAME_WORLD_INDICATORS):
+                    if self._find_any_template_with_confidence(screenshot_path, self.GAME_WORLD_INDICATORS, self.world_confidence):
                         stable_checks += 1
                         self.log_message(f"✅ Stability check {check + 1}/3: game world detected")
                     else:
@@ -437,7 +557,7 @@ class AutoStartGameModule:
         if is_stable:
             self.log_message(f"✅ Game world confirmed stable ({stable_checks}/3 checks)")
         else:
-            self.log_message(f"❌ Game world unstable ({stable_checks}/3 checks) - check your world templates")
+            self.log_message(f"❌ Game world unstable ({stable_checks}/3 checks)")
         
         return is_stable
     
@@ -453,7 +573,7 @@ class AutoStartGameModule:
                 return False
             
             try:
-                return self._find_any_template(screenshot_path, self.GAME_WORLD_INDICATORS)
+                return self._find_any_template_with_confidence(screenshot_path, self.GAME_WORLD_INDICATORS, self.world_confidence)
             finally:
                 self._cleanup_screenshot(screenshot_path)
                 
@@ -471,44 +591,8 @@ class AutoStartGameModule:
         except:
             return False
     
-    # Template matching methods
-    def _find_any_template(self, screenshot_path: str, template_names: list) -> bool:
-        """Find any template from list"""
-        try:
-            screenshot = cv2.imread(screenshot_path)
-            if screenshot is None:
-                self.log_message(f"❌ Could not load screenshot: {screenshot_path}")
-                return False
-            
-            for template_name in template_names:
-                template_path = os.path.join(self.templates_dir, template_name)
-                if not os.path.exists(template_path):
-                    continue
-                
-                template = cv2.imread(template_path)
-                if template is None:
-                    self.log_message(f"⚠️ Could not load template: {template_name}")
-                    continue
-                
-                result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
-                _, max_val, _, _ = cv2.minMaxLoc(result)
-                
-                if max_val >= self.confidence_threshold:
-                    self.log_message(f"✅ Template match: {template_name} (confidence: {max_val:.3f})")
-                    return True
-            
-            return False
-            
-        except Exception as e:
-            self.log_message(f"❌ Error in template matching: {e}")
-            return False
-    
-    def _find_template_only(self, screenshot_path: str, template_name: str) -> bool:
-        """Find specific template without clicking"""
-        return self._find_any_template(screenshot_path, [template_name])
-    
-    def _click_template(self, screenshot_path: str, template_name: str, instance_index: int) -> bool:
-        """Click on template if found"""
+    def _click_template_improved(self, screenshot_path: str, template_name: str, instance_index: int) -> bool:
+        """Improved template clicking with better accuracy"""
         try:
             template_path = os.path.join(self.templates_dir, template_name)
             if not os.path.exists(template_path):
@@ -523,10 +607,18 @@ class AutoStartGameModule:
             result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, max_loc = cv2.minMaxLoc(result)
             
-            if max_val >= self.confidence_threshold:
+            # Use appropriate confidence threshold
+            threshold = self.close_button_confidence if template_name in self.CLOSE_BUTTONS else self.confidence_threshold
+            
+            if max_val >= threshold:
                 template_h, template_w = template.shape[:2]
                 click_x = max_loc[0] + template_w // 2
                 click_y = max_loc[1] + template_h // 2
+                
+                # Ensure click is within reasonable bounds
+                screen_h, screen_w = screenshot.shape[:2]
+                click_x = max(10, min(click_x, screen_w - 10))
+                click_y = max(10, min(click_y, screen_h - 10))
                 
                 self.log_message(f"👆 Clicking template {template_name} at ({click_x}, {click_y}) confidence: {max_val:.3f}")
                 return self._click_position(instance_index, click_x, click_y)
