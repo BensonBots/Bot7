@@ -1,6 +1,6 @@
 """
-BENSON v2.0 - FIXED UI Manager - Compact Version
-Reduced from 400+ lines to ~200 lines while maintaining all functionality
+BENSON v2.0 - Updated UI Manager with Improved Module Settings
+Updated to use the new enhanced module settings GUI
 """
 
 import tkinter as tk
@@ -8,7 +8,7 @@ from tkinter import messagebox, ttk
 
 
 class UIManager:
-    """Compact UI manager with essential functionality"""
+    """UI manager with enhanced module settings support"""
 
     def __init__(self, app_ref):
         self.app = app_ref
@@ -294,20 +294,34 @@ class UIManager:
                 self.app.instance_ops.create_instance_with_name(name)
 
     def show_modules(self, instance_name):
-        """Show module settings window"""
+        """Show enhanced module settings window"""
         try:
-            self.app.add_console_message(f"🔧 Opening module configuration for: {instance_name}")
+            self.app.add_console_message(f"🔧 Opening enhanced module configuration for: {instance_name}")
             self.app.update_idletasks()
             
-            # Import and show modules_settings
-            from gui.dialogs.modules_settings import show_slim_module_settings
-            settings_window = show_slim_module_settings(self.app, instance_name, app_ref=self.app)
-            
-            if settings_window:
-                self.app.add_console_message(f"✅ Module configuration opened for: {instance_name}")
-                return settings_window
-            else:
-                self.app.add_console_message(f"❌ Failed to open module configuration for: {instance_name}")
+            # Import and show the improved modules settings
+            try:
+                # Try the new improved module settings first
+                from gui.dialogs.modules_settings import show_improved_module_settings
+                settings_window = show_improved_module_settings(self.app, instance_name, app_ref=self.app)
+                
+                if settings_window:
+                    self.app.add_console_message(f"✅ Enhanced module configuration opened for: {instance_name}")
+                    return settings_window
+                else:
+                    self.app.add_console_message(f"❌ Failed to open enhanced module configuration for: {instance_name}")
+                    
+            except ImportError:
+                # Fallback to regular module settings
+                print("[UIManager] Enhanced module settings not available, using regular version")
+                from gui.dialogs.modules_settings import show_slim_module_settings
+                settings_window = show_slim_module_settings(self.app, instance_name, app_ref=self.app)
+                
+                if settings_window:
+                    self.app.add_console_message(f"✅ Module configuration opened for: {instance_name}")
+                    return settings_window
+                else:
+                    self.app.add_console_message(f"❌ Failed to open module configuration for: {instance_name}")
                     
         except ImportError as e:
             print(f"[UIManager] modules_settings import failed: {e}")

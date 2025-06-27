@@ -1,6 +1,6 @@
 """
 BENSON v2.0 - FIXED Module Manager
-Fixed AutoGather initialization with proper dependencies
+Added proper settings reload and AutoGather update methods
 """
 
 import os
@@ -11,7 +11,7 @@ from typing import Dict
 
 
 class ModuleManager:
-    """Fixed module manager with proper AutoGather integration and dependencies"""
+    """Fixed module manager with proper AutoGather integration and settings reload"""
     
     def __init__(self, app_ref):
         self.app = app_ref
@@ -430,12 +430,57 @@ class ModuleManager:
             print(f"[ModuleManager] ❌ Refresh error: {e}")
     
     def reload_instance_settings(self, instance_name: str):
-        """Reload settings when changed"""
+        """Reload settings when changed - FIXED VERSION"""
         try:
             print(f"[ModuleManager] 🔄 Reloading settings for {instance_name}")
-            settings = self._load_settings(instance_name)
-            self.settings_cache[instance_name] = settings
+            
+            # Load fresh settings from file
+            old_settings = self.settings_cache.get(instance_name, {})
+            new_settings = self._load_settings(instance_name)
+            self.settings_cache[instance_name] = new_settings
+            
+            # Update AutoGather module settings if it exists and settings changed
+            if (instance_name in self.instance_modules and 
+                "AutoGather" in self.instance_modules[instance_name]):
+                
+                autogather_module = self.instance_modules[instance_name]["AutoGather"]
+                
+                # Check if AutoGather settings changed
+                old_gather = old_settings.get("auto_gather", {})
+                new_gather = new_settings.get("auto_gather", {})
+                
+                if old_gather != new_gather:
+                    print(f"[ModuleManager] AutoGather settings changed for {instance_name}")
+                    if hasattr(autogather_module, 'update_settings'):
+                        try:
+                            autogather_module.update_settings(new_gather)
+                            print(f"[ModuleManager] ✅ AutoGather settings updated for {instance_name}")
+                        except Exception as e:
+                            print(f"[ModuleManager] ❌ Error updating AutoGather settings: {e}")
+                    
+                    # If module was disabled, stop it
+                    if not new_gather.get("enabled", True) and self.running_modules[instance_name].get("AutoGather", False):
+                        try:
+                            autogather_module.stop()
+                            self.running_modules[instance_name]["AutoGather"] = False
+                            print(f"[ModuleManager] ✅ AutoGather stopped for {instance_name} (disabled)")
+                        except Exception as e:
+                            print(f"[ModuleManager] ❌ Error stopping AutoGather: {e}")
+                    
+                    # If module was enabled and instance is running, start it
+                    elif (new_gather.get("enabled", True) and 
+                          not self.running_modules[instance_name].get("AutoGather", False)):
+                        instance = self.app.instance_manager.get_instance(instance_name)
+                        if instance and instance["status"] == "Running":
+                            try:
+                                autogather_module.start()
+                                self.running_modules[instance_name]["AutoGather"] = True
+                                print(f"[ModuleManager] ✅ AutoGather started for {instance_name} (enabled)")
+                            except Exception as e:
+                                print(f"[ModuleManager] ❌ Error starting AutoGather: {e}")
+            
             print(f"[ModuleManager] ✅ Settings reloaded for {instance_name}")
+            
         except Exception as e:
             print(f"[ModuleManager] ❌ Settings reload error: {e}")
     
@@ -479,6 +524,43 @@ class ModuleManager:
         print(f"[ModuleManager] 🔧 Manual AutoGather start requested for {instance_name}")
         self._start_autogather(instance_name)
     
+    def manual_stop_autogather(self, instance_name: str):
+        """Manually stop AutoGather"""
+        try:
+            if (instance_name in self.instance_modules and 
+                "AutoGather" in self.instance_modules[instance_name]):
+                
+                autogather_module = self.instance_modules[instance_name]["AutoGather"]
+                autogather_module.stop()
+                self.running_modules[instance_name]["AutoGather"] = False
+                print(f"[ModuleManager] ✅ AutoGather manually stopped for {instance_name}")
+                return True
+            else:
+                print(f"[ModuleManager] ❌ No AutoGather module found for {instance_name}")
+                return False
+        except Exception as e:
+            print(f"[ModuleManager] ❌ Error manually stopping AutoGather: {e}")
+            return False
+    
+    def get_autogather_settings(self, instance_name: str) -> Dict:
+        """Get current AutoGather settings for an instance"""
+        try:
+            if (instance_name in self.instance_modules and 
+                "AutoGather" in self.instance_modules[instance_name]):
+                
+                autogather_module = self.instance_modules[instance_name]["AutoGather"]
+                if hasattr(autogather_module, 'get_current_settings'):
+                    return autogather_module.get_current_settings()
+                elif hasattr(autogather_module, 'settings'):
+                    return autogather_module.settings
+            
+            # Fallback to cached settings
+            return self.settings_cache.get(instance_name, {}).get("auto_gather", {})
+            
+        except Exception as e:
+            print(f"[ModuleManager] Error getting AutoGather settings: {e}")
+            return {}
+    
     # Helper methods
     def _recently_completed(self, instance_name: str) -> bool:
         """Check if AutoStart completed recently"""
@@ -499,13 +581,21 @@ class ModuleManager:
             "autostart_game": {
                 "auto_startup": False, 
                 "max_retries": 3, 
-                "enabled": True
+                "enabled": True,
+                "retry_delay": 10
             },
             "auto_gather": {
                 "enabled": True, 
-                "check_interval": 30,
+                "check_interval": 60,
                 "resource_types": ["food", "wood", "iron", "stone"],
+                "resource_loop": ["food", "wood", "iron", "stone"],
+                "max_queues": 6,
                 "max_concurrent_gathers": 5
+            },
+            "march_assignment": {
+                "enabled": True,
+                "unlocked_queues": 2,
+                "queue_assignments": {"1": "AutoGather", "2": "AutoGather"}
             }
         }
         

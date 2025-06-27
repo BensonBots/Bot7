@@ -1,1076 +1,932 @@
 """
-BENSON v2.0 - AutoGather Module (Production Ready)
-Handles automatic resource gathering with PaddleOCR integration
+BENSON v2.0 - Improved AutoGather Settings with Custom Resource Loop
+Allows easy customization of resource gathering order with duplicates
 """
 
+import tkinter as tk
+from tkinter import ttk, messagebox
+import json
 import os
-import time
-import cv2
-import threading
-import subprocess
-from typing import List, Tuple, Optional, Dict, Any
-import numpy as np
-import re
-from datetime import datetime
 
 
-class AutoGather:
-    """AutoGather module for automatic resource collection"""
+class ImprovedModuleSettings:
+    """Enhanced module settings with custom resource loop editor"""
     
-    def __init__(self, instance_name: str, instance_index: int, ocr, adb_utils, logger=None, log_callback=None, debug_mode: bool = False, verbose_logging: bool = False):
+    def __init__(self, parent, instance_name, app_ref=None):
+        self.parent = parent
         self.instance_name = instance_name
-        self.instance_index = instance_index
-        self.ocr = ocr
-        self.adb_utils = adb_utils
-        self.logger = log_callback or logger
-        self.debug_mode = debug_mode
-        self.verbose_logging = verbose_logging
-        self.running = False
-        self.worker_thread = None
-        self.cycle_count = 0
-        
-        # AutoGather settings
+        self.app_ref = app_ref
+        self.instance_running = self._check_instance_running()
+        self.settings_file = f"settings_{instance_name}.json"
         self.settings = self._load_settings()
+        self.current_module = "autostart_game"
         
-        # Initialize templates directory
-        self.templates_dir = os.path.join(os.getcwd(), "templates")
-        if not os.path.exists(self.templates_dir):
-            self.log_message(f"❌ Templates directory not found: {self.templates_dir}")
+        # Variables for form inputs
+        self.form_vars = {}
         
-        # Template categories
-        self.NAVIGATION_TEMPLATES = ["open_left.png", "close_left.png", "wilderness_button.png"]
-        self.GATHER_TEMPLATES = ["gather_button.png", "deploy_button.png", "search_button.png", "searchrss_button.png"]
-        self.RESOURCE_TEMPLATES = ["wood_icon.png", "stone_icon.png", "iron_icon.png", "bread_icon.png"]
-        self.CLOSE_TEMPLATES = ["close_x.png", "close_x2.png", "close_x3.png", "close_x4.png", "close_x5.png", "close_x6.png"]
-        
-        # Resource icon mappings
-        self.RESOURCE_ICONS = {
-            "food": "bread_icon.png",
-            "wood": "wood_icon.png", 
-            "stone": "stone_icon.png",
-            "iron": "iron_icon.png"
-        }
-        
-        self.log_message(f"✅ AutoGather initialized for {instance_name}")
-        self.log_message(f"📋 Settings: {self.settings}")
-
-    def _load_settings(self) -> Dict[str, Any]:
-        """Load AutoGather settings"""
-        default_settings = {
-            'resource_loop': ['food', 'wood', 'stone', 'iron'],
-            'current_index': 0,
-            'max_queues': 6,
-            'enabled': True
-        }
-        return default_settings
-    
-    def _get_next_resource(self) -> str:
-        """Get next resource from the loop"""
-        resources = self.settings['resource_loop']
-        if not resources:
-            return 'food'
-        
-        resource = resources[self.settings['current_index'] % len(resources)]
-        self.settings['current_index'] += 1
-        return resource
-
-    def log_message(self, message: str) -> None:
-        """Log a message with timestamp - only important messages shown"""
-        if self.logger:
-            self.logger(message)
-        else:
-            # Only show important status messages, not debug/verbose info
-            if any(keyword in message for keyword in [
-                '✅ AutoGather initialized',
-                '🚀 Starting AutoGather',
-                '🔄 AutoGather worker loop started', 
-                '🌾 Starting AutoGather cycle',
-                '✅ Gather cycle completed',
-                '❌ Gather cycle failed',
-                '⏳ Waiting 60s',
-                '🛑 Stopping AutoGather',
-                '📊 March Analysis:',
-                '📈 Total march queues detected:',
-                '🌾 Gathering:',
-                '🔄 Returning:',
-                '⚔️ Attack/Rally:',
-                '💤 Idle:',
-                '🔒 Locked/Cannot Use:',
-                '⏳ Waiting:',
-                '🎯 Resources:',
-                '❌ Failed to'
-            ]):
-                timestamp = datetime.now().strftime("%H:%M:%S")
-                print(f"[{timestamp}] {message}")
-
-    def start(self) -> None:
-        """Start the AutoGather worker"""
-        if self.running:
-            self.log_message("⚠️ AutoGather already running")
-            return
-        
-        self.running = True
-        self.cycle_count = 0
-        self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
-        self.worker_thread.start()
-        self.log_message("🚀 Starting AutoGather...")
-
-    def stop(self) -> None:
-        """Stop the AutoGather worker"""
-        self.running = False
-        if self.worker_thread and self.worker_thread.is_alive():
-            self.worker_thread.join(timeout=5)
-        self.log_message("🛑 Stopping AutoGather...")
-
-    def _worker_loop(self) -> None:
-        """Main worker loop for AutoGather"""
-        self.log_message("🔄 AutoGather worker loop started")
-        
-        while self.running:
-            try:
-                self.cycle_count += 1
-                self.log_message(f"🌾 Starting AutoGather cycle {self.cycle_count}")
-                
-                if self._perform_gather_cycle():
-                    self.log_message("✅ Gather cycle completed successfully")
-                else:
-                    self.log_message("❌ Gather cycle failed")
-                
-                # Wait 60 seconds before next cycle
-                self.log_message("⏳ Waiting 60s before next cycle...")
-                for _ in range(60):
-                    if not self.running:
-                        break
-                    time.sleep(1)
-                    
-            except Exception as e:
-                self.log_message(f"❌ Worker loop error: {e}")
-                time.sleep(30)
-
-    def _perform_gather_cycle(self) -> bool:
-        """Perform a single gather cycle"""
-        try:
-            # Check if gathering is needed
-            march_texts = self._perform_ocr_detection()
-            march_analysis = self._analyze_march_data(march_texts)
-            
-            if march_texts:
-                self._log_march_analysis(march_analysis)
-            
-            # Calculate deployment plan
-            idle_queues = self._find_idle_queues_from_analysis(march_analysis)
-            active_queues = march_analysis.get('gathering_marches', 0)
-            available_slots = self.settings['max_queues'] - active_queues
-            marches_to_deploy = min(available_slots, len(idle_queues))
-            
-            if marches_to_deploy <= 0:
-                # No deployment needed - just monitor
-                return True
-            
-            self.log_message(f"🚀 Deploying {marches_to_deploy} march(es) to queues: {idle_queues[:marches_to_deploy]}")
-            
-            # Navigate to world view for gathering
-            if not self._navigate_to_world_view():
-                self.log_message("❌ Failed to navigate to world view")
-                return False
-            
-            # Execute deployments
-            return self._execute_march_deployments(idle_queues[:marches_to_deploy])
-            
-        except Exception as e:
-            self.log_message(f"❌ Gather cycle error: {e}")
-            return False
-
-    def _find_idle_queues_from_analysis(self, analysis: Dict[str, Any]) -> List[int]:
-        """Find idle queue numbers from march analysis"""
-        idle_queues = []
-        for march in analysis.get('march_details', []):
-            if march.get('type') == 'idle':
-                queue_num = march.get('queue_number')
-                if queue_num:
-                    idle_queues.append(queue_num)
-        return sorted(idle_queues)
-
-    def _navigate_to_world_view(self) -> bool:
-        """Navigate to world view for gathering"""
-        try:
-            screenshot_path = self._take_screenshot()
-            if not screenshot_path:
-                return False
-            
-            try:
-                # Check if we're already in world view
-                if self._template_exists(screenshot_path, "world_icon.png", threshold=0.8):
-                    # We're in town view, need to click world icon to go to world view
-                    if self._click_template_if_found(screenshot_path, "world_icon.png", threshold=0.8):
-                        time.sleep(2)
-                        
-                        # Verify we're now in world view by checking for town icon
-                        new_screenshot = self._take_screenshot()
-                        if new_screenshot:
-                            try:
-                                if self._template_exists(new_screenshot, "town_icon.png", threshold=0.8):
-                                    return True
-                                else:
-                                    self.log_message("❌ Failed to verify world view (no town icon)")
-                                    return False
-                            finally:
-                                self._cleanup_screenshot(new_screenshot)
-                    else:
-                        self.log_message("❌ Failed to click world icon")
-                        return False
-                
-                elif self._template_exists(screenshot_path, "town_icon.png", threshold=0.8):
-                    # Already in world view
-                    return True
-                else:
-                    self.log_message("❌ Cannot determine current view state")
-                    return False
-                    
-            finally:
-                self._cleanup_screenshot(screenshot_path)
-                
-        except Exception as e:
-            self.log_message(f"❌ Navigation to world view error: {e}")
-            return False
-
-    def _execute_march_deployments(self, idle_queues: List[int]) -> bool:
-        """Execute march deployments"""
-        try:
-            success_count = 0
-            is_first_march = True
-            
-            for i, queue_number in enumerate(idle_queues):
-                resource_type = self._get_next_resource()
-                
-                self.log_message(f"🚀 Deploying {resource_type} on Queue {queue_number} ({i+1}/{len(idle_queues)})")
-                
-                if is_first_march:
-                    march_success = self._start_first_march(resource_type, queue_number)
-                    is_first_march = False
-                else:
-                    march_success = self._start_subsequent_march(resource_type, queue_number)
-                
-                if march_success:
-                    success_count += 1
-                    self.log_message(f"✅ Deployed {resource_type} on Queue {queue_number}")
-                else:
-                    self.log_message(f"❌ Failed to deploy {resource_type} on Queue {queue_number}")
-            
-            self.log_message(f"📊 Deployment summary: {success_count}/{len(idle_queues)} successful")
-            return success_count > 0
-            
-        except Exception as e:
-            self.log_message(f"❌ Error executing deployments: {e}")
-            return False
-
-    def _start_first_march(self, resource_type: str, queue_number: int) -> bool:
-        """Start the first march (with full navigation)"""
-        try:
-            return self._execute_gathering_sequence(resource_type, queue_number)
-        except Exception as e:
-            self.log_message(f"❌ Error starting first march: {e}")
-            return False
-
-    def _start_subsequent_march(self, resource_type: str, queue_number: int) -> bool:
-        """Start subsequent march (already in world view)"""
-        try:
-            time.sleep(1)
-            return self._execute_gathering_sequence(resource_type, queue_number)
-        except Exception as e:
-            self.log_message(f"❌ Error starting subsequent march: {e}")
-            return False
-
-    def _execute_gathering_sequence(self, resource_type: str, queue_number: int) -> bool:
-        """Execute the complete gathering sequence"""
-        try:
-            return (self._click_search_and_dismiss_popup() and
-                    self._perform_scroll_to_reveal_resources() and
-                    self._select_resource_type(resource_type) and
-                    self._set_max_level_and_search() and
-                    self._deploy_march())
-        except Exception as e:
-            self.log_message(f"❌ Error in gathering sequence: {e}")
-            return False
-
-    def _navigate_to_march_queue(self) -> bool:
-        """Navigate to march queue interface"""
-        try:
-            screenshot_path = self._take_screenshot()
-            if not screenshot_path:
-                return False
-
-            try:
-                # Check if left panel needs to be opened
-                if self._template_exists(screenshot_path, "open_left.png", threshold=0.7):
-                    if self._click_template_if_found(screenshot_path, "open_left.png", threshold=0.7):
-                        time.sleep(2)
-                        
-                        # Take new screenshot
-                        new_screenshot = self._take_screenshot()
-                        if new_screenshot:
-                            self._cleanup_screenshot(screenshot_path)
-                            screenshot_path = new_screenshot
-                
-                # Look for wilderness button
-                if self._click_template_if_found(screenshot_path, "wilderness_button.png", threshold=0.8):
-                    time.sleep(2)
-                    
-                    # Take new screenshot to verify
-                    new_screenshot = self._take_screenshot()
-                    if new_screenshot:
-                        try:
-                            if self._template_exists(new_screenshot, "close_left.png", threshold=0.8):
-                                return True
-                            else:
-                                return False
-                        finally:
-                            self._cleanup_screenshot(new_screenshot)
-                else:
-                    return False
-                    
-            finally:
-                self._cleanup_screenshot(screenshot_path)
-            
-            return False
-                
-        except Exception as e:
-            self.log_message(f"❌ Navigation error: {e}")
-            return False
-
-    def _perform_ocr_detection(self) -> List[str]:
-        """Perform OCR detection on march queue region to find text-based march information"""
-        detected_texts = []
-        
-        try:
-            if not self.ocr:
-                return detected_texts
-            
-            screenshot_path = self._take_screenshot()
-            if not screenshot_path:
-                return detected_texts
-            
-            try:
-                img = cv2.imread(screenshot_path)
-                if img is None:
-                    return detected_texts
-                
-                # OCR region coordinates
-                march_queue_x1 = 63
-                march_queue_y1 = 195
-                march_queue_x2 = 247
-                march_queue_y2 = 484
-                
-                # Ensure crop region is within image bounds
-                img_height, img_width = img.shape[:2]
-                
-                crop_x1 = max(0, march_queue_x1)
-                crop_y1 = max(0, march_queue_y1)
-                crop_x2 = min(img_width, march_queue_x2)
-                crop_y2 = min(img_height, march_queue_y2)
-                
-                if crop_x2 <= crop_x1 or crop_y2 <= crop_y1:
-                    return detected_texts
-                
-                cropped_img = img[crop_y1:crop_y2, crop_x1:crop_x2]
-                
-                if cropped_img.size == 0:
-                    return detected_texts
-                
-                # Only save debug image if debug mode is enabled
-                if self.debug_mode:
-                    debug_crop_path = f"debug_crop_{self.instance_name}_{int(time.time())}.png"
-                    cv2.imwrite(debug_crop_path, cropped_img)
-                
-                result = self.ocr.ocr(cropped_img)
-                
-                if result and len(result) > 0:
-                    ocr_data = result[0]
-                    
-                    if isinstance(ocr_data, dict):
-                        if 'rec_texts' in ocr_data and 'rec_scores' in ocr_data:
-                            texts = ocr_data['rec_texts']
-                            scores = ocr_data['rec_scores']
-                            
-                            for i, (text, confidence) in enumerate(zip(texts, scores)):
-                                text = text.strip()
-                                
-                                if self._is_march_related_text(text):
-                                    detected_texts.append(text)
-                    
-                    elif isinstance(ocr_data, list):
-                        for line_result in ocr_data:
-                            if line_result and len(line_result) >= 2:
-                                text_info = line_result[1]
-                                if isinstance(text_info, (list, tuple)) and len(text_info) >= 1:
-                                    text = text_info[0].strip()
-                                    
-                                    if self._is_march_related_text(text):
-                                        detected_texts.append(text)
-                    
-            except Exception:
-                pass
-            finally:
-                self._cleanup_screenshot(screenshot_path)
-        
-        except Exception:
-            pass
-        
-        return detected_texts
-
-    def _analyze_march_data(self, march_texts: List[str]) -> Dict[str, Any]:
-        """Analyze detected march texts to extract meaningful information"""
-        analysis = {
-            'total_queues': 0,
-            'gathering_marches': 0,
-            'returning_marches': 0,
-            'attack_marches': 0,
-            'idle_marches': 0,
-            'waiting_marches': 0,
-            'locked_marches': 0,
-            'resource_types': set(),
-            'march_details': []
-        }
-        
-        queue_data = {}
-        current_queue = None
-        
-        for i, text in enumerate(march_texts):
-            text_lower = text.lower().strip()
-            
-            queue_match = re.search(r'march queue (\d+)', text_lower)
-            if queue_match:
-                queue_num = int(queue_match.group(1))
-                current_queue = queue_num
-                if queue_num not in queue_data:
-                    queue_data[queue_num] = {'queue_text': text, 'status': None, 'time': None, 'additional_info': []}
-            
-            elif any(keyword in text_lower for keyword in ['gathering', 'returning', 'attack', 'rally', 'waiting', 'go to']):
-                if current_queue and current_queue in queue_data:
-                    queue_data[current_queue]['status'] = text
-                else:
-                    inferred_queue = (i // 2) + 1
-                    if inferred_queue and inferred_queue not in queue_data and 1 <= inferred_queue <= 6:
-                        queue_data[inferred_queue] = {'queue_text': f'March Queue {inferred_queue}', 'status': text, 'time': None, 'additional_info': []}
-                    elif inferred_queue and inferred_queue in queue_data:
-                        queue_data[inferred_queue]['status'] = text
-            
-            elif re.search(r'\d+:\d+:\d+', text) or re.search(r'\d+:\d+', text):
-                if current_queue and current_queue in queue_data:
-                    queue_data[current_queue]['time'] = text
-                else:
-                    inferred_queue = (i // 2) + 1
-                    if inferred_queue and inferred_queue in queue_data and 1 <= inferred_queue <= 6:
-                        queue_data[inferred_queue]['time'] = text
-            
-            elif text_lower in ['idle', 'unlock', 'cannot use']:
-                if current_queue and current_queue in queue_data:
-                    queue_data[current_queue]['status'] = text
-        
-        # Analyze each detected queue
-        for queue_num in sorted(queue_data.keys()):
-            data = queue_data[queue_num]
-            status = data.get('status', 'unknown')
-            status_lower = status.lower().strip() if status else ''
-            
-            march_info = {
-                'queue_number': queue_num,
-                'queue_text': data['queue_text'],
-                'status': status,
-                'time_remaining': data.get('time'),
-                'type': 'unknown',
-                'resource': None,
-                'location': None
-            }
-            
-            if 'gathering' in status_lower:
-                march_info['type'] = 'gathering'
-                analysis['gathering_marches'] += 1
-            elif 'returning' in status_lower:
-                march_info['type'] = 'returning'
-                analysis['returning_marches'] += 1
-            elif any(word in status_lower for word in ['attack', 'rally']):
-                march_info['type'] = 'attack'
-                analysis['attack_marches'] += 1
-            elif 'waiting' in status_lower:
-                march_info['type'] = 'waiting'
-                analysis['waiting_marches'] += 1
-            elif any(word in status_lower for word in ['go to', 'goto']):
-                march_info['type'] = 'marching'
-            elif 'idle' in status_lower:
-                march_info['type'] = 'idle'
-                analysis['idle_marches'] += 1
-            elif any(word in status_lower for word in ['cannot use', 'unlock']):
-                march_info['type'] = 'locked'
-                analysis['locked_marches'] += 1
-            
-            combined_text = f"{data['queue_text']} {status}".lower()
-            resource_mapping = {
-                'mill': 'food',
-                'lumberyard': 'wood', 
-                'lumber': 'wood',
-                'quarry': 'stone',
-                'iron mine': 'iron',
-                'mine': 'iron'
-            }
-            
-            for location, resource in resource_mapping.items():
-                if location in combined_text:
-                    march_info['resource'] = resource
-                    march_info['location'] = location
-                    analysis['resource_types'].add(resource)
-                    break
-            
-            level_match = re.search(r'lv\.?\s*(\d+)', combined_text)
-            if level_match:
-                march_info['level'] = int(level_match.group(1))
-            
-            analysis['march_details'].append(march_info)
-            analysis['total_queues'] += 1
-        
-        analysis['resource_types'] = list(analysis['resource_types'])
-        return analysis
-    
-    def _log_march_analysis(self, analysis: Dict[str, Any]) -> None:
-        """Log march analysis results"""
-        self.log_message("📊 March Analysis:")
-        self.log_message(f"   📈 Total march queues detected: {analysis['total_queues']}")
-        
-        if analysis['gathering_marches'] > 0:
-            self.log_message(f"   🌾 Gathering: {analysis['gathering_marches']}")
-        if analysis['returning_marches'] > 0:
-            self.log_message(f"   🔄 Returning: {analysis['returning_marches']}")
-        if analysis['attack_marches'] > 0:
-            self.log_message(f"   ⚔️ Attack/Rally: {analysis['attack_marches']}")
-        if analysis['idle_marches'] > 0:
-            self.log_message(f"   💤 Idle: {analysis['idle_marches']}")
-        if analysis['locked_marches'] > 0:
-            self.log_message(f"   🔒 Locked/Cannot Use: {analysis['locked_marches']}")
-        if analysis['waiting_marches'] > 0:
-            self.log_message(f"   ⏳ Waiting: {analysis['waiting_marches']}")
-        
-        if analysis['resource_types']:
-            self.log_message(f"   🎯 Resources: {', '.join(analysis['resource_types'])}")
-
-    def _is_march_related_text(self, text: str) -> bool:
-        """Check if detected text is related to marches or gathering"""
-        if not text or len(text.strip()) < 2:
-            return False
-        
-        text_lower = text.lower().strip()
-        
-        keywords = [
-            'march', 'gather', 'gathering', 'collecting', 'returning', 'troop',
-            'wood', 'stone', 'iron', 'food', 'bread', 'resource',
-            'level', 'lvl', 'tier', 'queue', 'attack', 'rally',
-            'waiting', 'go to', 'goto', 'idle', 'cannot use', 'unlock',
-            'mill', 'lumberyard', 'quarry', 'iron mine', 'mine'
+        # Resource loop management
+        self.resource_loop = []
+        self.loop_listbox = None
+        self.available_resources = [
+            {"id": "food", "name": "🌾 Food", "color": "#4caf50"},
+            {"id": "wood", "name": "🪵 Wood", "color": "#8bc34a"},
+            {"id": "iron", "name": "⛏️ Iron", "color": "#607d8b"},
+            {"id": "stone", "name": "🗿 Stone", "color": "#795548"}
         ]
         
-        for keyword in keywords:
-            if keyword in text_lower:
-                return True
-        
-        if re.search(r'\d+:\d+', text):
-            return True
-        
+        # Create window and setup UI
+        self._create_window()
+        self._setup_complete_ui()
+        self._show_module_settings("autostart_game")
+    
+    def _check_instance_running(self):
+        """Check if instance is running"""
+        try:
+            if self.app_ref:
+                instance = self.app_ref.instance_manager.get_instance(self.instance_name)
+                return instance and instance["status"] == "Running"
+        except:
+            pass
         return False
-
-    def _click_search_and_dismiss_popup(self) -> bool:
-        """Click search button and dismiss any popup"""
-        try:
-            search_position = (31, 535)
-            if not self.adb_utils.run_adb_command(self.instance_index, f"input tap {search_position[0]} {search_position[1]}"):
-                return False
-            
-            time.sleep(1)
-            
-            dismiss_position = (50, 750)
-            self.adb_utils.run_adb_command(self.instance_index, f"input tap {dismiss_position[0]} {dismiss_position[1]}")
-            time.sleep(2)
-            
-            return self._verify_resource_selection_screen()
-        except Exception:
-            return False
-
-    def _deploy_march(self) -> bool:
-        """Deploy march with deploy button"""
-        try:
-            screenshot_path = self._take_screenshot()
-            if not screenshot_path:
-                return False
-            
-            try:
-                deploy_buttons = ["deploy_button.png", "deploy.png"]
-                confidences = [0.6, 0.5, 0.4]
-                
-                for deploy_button in deploy_buttons:
-                    for confidence in confidences:
-                        if self._click_template_if_found(screenshot_path, deploy_button, threshold=confidence):
-                            time.sleep(2)
-                            return True
-                
-                return False
-                
-            finally:
-                self._cleanup_screenshot(screenshot_path)
-                
-        except Exception:
-            return False
-
-    def _take_screenshot(self) -> Optional[str]:
-        """Take a screenshot using ADB"""
-        try:
-            if not self.adb_utils:
-                return None
-            
-            for attempt in range(3):
-                try:
-                    screenshot_data = self.adb_utils.get_screenshot_data(self.instance_index)
-                    if screenshot_data:
-                        nparr = np.frombuffer(screenshot_data, np.uint8)
-                        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                        
-                        if img is not None:
-                            screenshot_path = f"screenshot_{self.instance_name}_{int(time.time())}.png"
-                            cv2.imwrite(screenshot_path, img)
-                            return screenshot_path
-                except Exception:
-                    pass
-            
-            device_path = "/sdcard/temp_screenshot.png"
-            save_cmd = f"screencap {device_path}"
-            
-            if self.adb_utils.run_adb_command(self.instance_index, save_cmd):
-                local_path = f"screenshot_{self.instance_name}_{int(time.time())}.png"
-                
-                pull_result = self.adb_utils.run_adb_command_raw(
-                    self.instance_index, 
-                    f"pull {device_path} {local_path}"
-                )
-                
-                if pull_result and os.path.exists(local_path):
-                    file_size = os.path.getsize(local_path)
-                    if file_size > 0:
-                        try:
-                            img = cv2.imread(local_path)
-                            if img is not None:
-                                self.adb_utils.run_adb_command(self.instance_index, f"rm {device_path}")
-                                return local_path
-                        except Exception:
-                            pass
-            
-            return None
-            
-        except Exception:
-            return None
-
-    def _find_template_matches(self, screenshot_path: str, template_name: str, threshold: float = 0.8) -> List[dict]:
-        """Find all matches of a template in screenshot"""
-        matches = []
-        try:
-            template_path = os.path.join(self.templates_dir, template_name)
-            if not os.path.exists(template_path):
-                return matches
-            
-            screenshot = cv2.imread(screenshot_path)
-            template = cv2.imread(template_path)
-            
-            if screenshot is None or template is None:
-                return matches
-            
-            result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
-            locations = np.where(result >= threshold)
-            
-            for pt in zip(*locations[::-1]):
-                confidence = result[pt[1], pt[0]]
-                matches.append({
-                    'location': pt,
-                    'confidence': float(confidence)
-                })
-            
-        except Exception:
-            pass
+    
+    def _create_window(self):
+        """Create main window"""
+        self.window = tk.Toplevel(self.parent)
+        self.window.title(f"Modules - {self.instance_name}")
+        self.window.geometry("1000x700")  # Increased size for better layout
+        self.window.configure(bg="#0f0f23")
+        self.window.transient(self.parent)
+        self.window.grab_set()
+        self.window.resizable(True, True)
         
-        return matches
-
-    def _template_exists(self, screenshot_path: str, template_name: str, threshold: float = 0.8) -> bool:
-        """Check if template exists in screenshot"""
-        matches = self._find_template_matches(screenshot_path, template_name, threshold)
-        return len(matches) > 0
-
-    def _click_template_if_found(self, screenshot_path: str, template_name: str, threshold: float = 0.8) -> bool:
-        """Click on template if found with sufficient confidence"""
-        try:
-            matches = self._find_template_matches(screenshot_path, template_name, threshold)
-            
-            if matches:
-                best_match = max(matches, key=lambda x: x['confidence'])
-                location = best_match['location']
-                
-                template_path = os.path.join(self.templates_dir, template_name)
-                template_img = cv2.imread(template_path)
-                
-                if template_img is not None:
-                    h, w = template_img.shape[:2]
-                    click_x = location[0] + w // 2
-                    click_y = location[1] + h // 2
-                    
-                    if self._click_position(click_x, click_y):
-                        return True
-                    else:
-                        return False
-            
-            return False
-            
-        except Exception:
-            return False
-
-    def _click_position(self, x: int, y: int) -> bool:
-        """Click at coordinates using ADB"""
-        try:
-            if not self.adb_utils:
-                return False
-            
-            click_cmd = f"input tap {x} {y}"
-            result = self.adb_utils.run_adb_command(self.instance_index, click_cmd)
-            return result is not None
-            
-        except Exception:
-            return False
-
-    def _cleanup_screenshot(self, screenshot_path: str) -> None:
-        """Cleanup screenshot file"""
-        try:
-            if screenshot_path and os.path.exists(screenshot_path):
-                os.remove(screenshot_path)
-        except Exception:
-            pass
-
-    def get_status(self) -> dict:
-        """Get current status of AutoGather"""
-        return {
-            'running': self.running,
-            'cycle_count': self.cycle_count,
-            'instance_name': self.instance_name,
-            'has_ocr': self.ocr is not None,
-            'has_adb': self.adb_utils is not None,
-            'settings': self.settings
-        }
+        # Center window
+        self.window.update_idletasks()
+        x = (self.window.winfo_screenwidth() // 2) - 500
+        y = (self.window.winfo_screenheight() // 2) - 350
+        self.window.geometry(f"1000x700+{x}+{y}")
     
-    def get_settings_config(self) -> dict:
-        """Return settings configuration for GUI"""
-        return {
-            'resource_loop': {
-                'type': 'text',
-                'label': 'Resource Loop (comma separated)',
-                'value': ','.join(self.settings['resource_loop']),
-                'description': 'Resources to gather in order: food, wood, stone, iron'
-            },
-            'max_queues': {
-                'type': 'number',
-                'label': 'Max Queues to Use',
-                'value': self.settings['max_queues'],
-                'min': 1,
-                'max': 6,
-                'description': 'Maximum march queues to use (leave some for rallies)'
-            },
-            'enabled': {
-                'type': 'boolean',
-                'label': 'Auto Gather Enabled',
-                'value': self.settings['enabled'],
-                'description': 'Enable automatic resource gathering'
-            }
-        }
-    
-    def update_settings(self, new_settings: dict) -> bool:
-        """Update settings from GUI"""
-        try:
-            if 'resource_loop' in new_settings:
-                resources = [r.strip().lower() for r in new_settings['resource_loop'].split(',')]
-                valid_resources = ['food', 'wood', 'stone', 'iron']
-                self.settings['resource_loop'] = [r for r in resources if r in valid_resources]
-                
-            if 'max_queues' in new_settings:
-                max_q = int(new_settings['max_queues'])
-                self.settings['max_queues'] = max(1, min(6, max_q))
-                
-            if 'enabled' in new_settings:
-                self.settings['enabled'] = bool(new_settings['enabled'])
-            
-            self.log_message(f"📋 Settings updated: {self.settings}")
-            return True
-            
-        except Exception as e:
-            self.log_message(f"❌ Error updating settings: {e}")
-            return False
-
-    def get_module_info(self) -> dict:
-        """Return module information for BENSON system"""
-        return {
-            'name': 'AutoGather',
-            'display_name': 'Auto Gather Resources',
-            'description': 'Automatically gathers resources using available march queues',
-            'version': '2.0.0',
-            'author': 'BENSON v2.0',
-            'supports_settings': True,
-            'supports_start_stop': True
-        }
-    
-    def get_current_settings(self) -> dict:
-        """Get current settings in the format expected by BENSON GUI"""
-        return {
-            'resource_loop': ','.join(self.settings['resource_loop']),
-            'max_queues': self.settings['max_queues'],
-            'enabled': self.settings['enabled']
-        }
-    
-    def validate_settings(self, settings: dict) -> Tuple[bool, List[str]]:
-        """Validate settings before applying"""
-        errors = []
+    def _setup_complete_ui(self):
+        """Setup complete UI"""
+        # Header
+        header = tk.Frame(self.window, bg="#1a1a3a", height=50)
+        header.pack(fill="x")
+        header.pack_propagate(False)
         
-        try:
-            if 'resource_loop' in settings:
-                resources = [r.strip().lower() for r in settings['resource_loop'].split(',')]
-                valid_resources = ['food', 'wood', 'stone', 'iron']
-                invalid = [r for r in resources if r not in valid_resources]
-                if invalid:
-                    errors.append(f"Invalid resources: {', '.join(invalid)}. Valid: {', '.join(valid_resources)}")
-                if not resources:
-                    errors.append("Resource loop cannot be empty")
-            
-            if 'max_queues' in settings:
-                try:
-                    max_q = int(settings['max_queues'])
-                    if max_q < 1 or max_q > 6:
-                        errors.append("Max queues must be between 1 and 6")
-                except ValueError:
-                    errors.append("Max queues must be a number")
-                    
-        except Exception as e:
-            errors.append(f"Settings validation error: {e}")
+        header_content = tk.Frame(header, bg="#1a1a3a")
+        header_content.pack(fill="both", expand=True, padx=15, pady=10)
         
-        return len(errors) == 0, errors
+        tk.Label(header_content, text=f"⚙️ {self.instance_name} Modules", bg="#1a1a3a", fg="#ffffff",
+                font=("Segoe UI", 14, "bold")).pack(side="left")
+        
+        # Status indicator
+        status_color = "#4caf50" if self.instance_running else "#757575"
+        status_text = "Running" if self.instance_running else "Stopped"
+        tk.Label(header_content, text=f"● {status_text}", bg="#1a1a3a", fg=status_color,
+                font=("Segoe UI", 10, "bold")).pack(side="left", padx=(20, 0))
+        
+        # Close button
+        close_btn = tk.Button(header_content, text="✕", bg="#1a1a3a", fg="#ff5252", relief="flat", bd=0,
+                             font=("Segoe UI", 14, "bold"), cursor="hand2", width=2, command=self._close_window)
+        close_btn.pack(side="right")
+        
+        # Main container
+        main_container = tk.Frame(self.window, bg="#0f0f23")
+        main_container.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        # Sidebar and content
+        self._setup_sidebar_and_content(main_container)
+        
+        # Footer
+        self._setup_footer()
     
-    def can_start(self) -> bool:
-        """Check if module can be started"""
-        return (self.settings['enabled'] and 
-                not self.running and 
-                self.adb_utils is not None and 
-                self.ocr is not None)
+    def _setup_sidebar_and_content(self, parent):
+        """Setup sidebar and content areas"""
+        # Sidebar
+        sidebar = tk.Frame(parent, bg="#1a1a3a", width=220, relief="solid", bd=1)
+        sidebar.pack(side="left", fill="y", padx=(0, 10))
+        sidebar.pack_propagate(False)
+        
+        # Sidebar header
+        header_frame = tk.Frame(sidebar, bg="#2d2d5a", height=35)
+        header_frame.pack(fill="x")
+        header_frame.pack_propagate(False)
+        tk.Label(header_frame, text="🔧 Modules", bg="#2d2d5a", fg="#ffffff",
+                font=("Segoe UI", 12, "bold")).pack(pady=8)
+        
+        # Module list
+        self._create_module_list(sidebar)
+        
+        # Content area
+        self.content_area = tk.Frame(parent, bg="#1a1a3a", relief="solid", bd=1)
+        self.content_area.pack(side="left", fill="both", expand=True)
+        
+        # Content header
+        self.content_header = tk.Frame(self.content_area, bg="#2d2d5a", height=40)
+        self.content_header.pack(fill="x")
+        self.content_header.pack_propagate(False)
+        
+        # Scrollable content
+        self._setup_scrollable_content()
     
-    def get_status_text(self) -> str:
-        """Get human-readable status text"""
-        if not self.settings['enabled']:
-            return "Disabled"
-        elif self.running:
-            return f"Running - Cycle {self.cycle_count}"
+    def _create_module_list(self, parent):
+        """Create module list with toggles"""
+        # Module definitions
+        self.modules = [
+            {"id": "autostart_game", "name": "AutoStart", "icon": "🎮", "color": "#4caf50", "required": True},
+            {"id": "auto_gather", "name": "AutoGather", "icon": "⛏️", "color": "#ff9800", "required": False},
+            {"id": "march_assignment", "name": "March Queues", "icon": "⚔️", "color": "#9c27b0", "required": False}
+        ]
+        
+        list_container = tk.Frame(parent, bg="#1a1a3a")
+        list_container.pack(fill="both", expand=True, padx=8, pady=5)
+        
+        self.module_vars = {}
+        self.module_frames = {}
+        
+        for module in self.modules:
+            self._create_module_item(list_container, module)
+    
+    def _create_module_item(self, parent, module):
+        """Create individual module item"""
+        module_id = module["id"]
+        is_enabled = self.settings.get(module_id, {}).get("enabled", True)
+        
+        # Item frame
+        item_frame = tk.Frame(parent, bg="#1e1e3f", relief="solid", bd=1, height=50)
+        item_frame.pack(fill="x", pady=2)
+        item_frame.pack_propagate(False)
+        
+        content = tk.Frame(item_frame, bg="#1e1e3f")
+        content.pack(fill="both", expand=True, padx=10, pady=8)
+        
+        # Left side - icon and name
+        left = tk.Frame(content, bg="#1e1e3f")
+        left.pack(side="left", fill="both", expand=True)
+        
+        icon_label = tk.Label(left, text=module['icon'], bg="#1e1e3f", fg=module["color"],
+                             font=("Segoe UI", 14), cursor="hand2")
+        icon_label.pack(side="left")
+        
+        name_label = tk.Label(left, text=module['name'], bg="#1e1e3f", fg="#ffffff",
+                             font=("Segoe UI", 10, "bold"), anchor="w", cursor="hand2")
+        name_label.pack(side="left", padx=(8, 0), fill="x", expand=True)
+        
+        # Right side - toggle or status
+        right = tk.Frame(content, bg="#1e1e3f")
+        right.pack(side="right")
+        
+        if module.get("required"):
+            tk.Label(right, text="REQ", bg="#1e1e3f", fg="#4caf50", font=("Segoe UI", 8, "bold")).pack()
+            self.module_vars[module_id] = None
         else:
-            return "Stopped"
-
-
-def register_module() -> dict:
-    """Register AutoGather module with BENSON system"""
-    return {
-        'name': 'AutoGather',
-        'display_name': 'Auto Gather Resources',
-        'description': 'Automatically gathers resources using available march queues with smart hibernation',
-        'version': '2.0.0',
-        'author': 'BENSON v2.0',
-        'class': AutoGather,
-        'supports_settings': True,
-        'supports_start_stop': True,
-        'default_enabled': False,
-        'settings_schema': {
-            'resource_loop': {
-                'type': 'text',
-                'label': 'Resource Loop',
-                'default': 'food,wood,stone,iron',
-                'description': 'Resources to gather in order (comma separated)',
-                'validation': 'required'
+            toggle_var = tk.BooleanVar(value=is_enabled)
+            self.module_vars[module_id] = toggle_var
+            toggle = tk.Checkbutton(right, variable=toggle_var, bg="#1e1e3f", activebackground="#1e1e3f",
+                                   selectcolor="#2d2d5a", relief="flat", command=lambda: self._on_toggle_change(module_id))
+            toggle.pack()
+        
+        # Click handler
+        def on_click(event):
+            self._show_module_settings(module_id)
+            self._update_selection(module_id)
+        
+        # Hover effects
+        def on_enter(event):
+            if module_id != self.current_module:
+                self._set_item_colors(item_frame, content, left, right, [icon_label, name_label], "#252550")
+        
+        def on_leave(event):
+            if module_id != self.current_module:
+                self._set_item_colors(item_frame, content, left, right, [icon_label, name_label], "#1e1e3f")
+        
+        # Bind events
+        widgets = [item_frame, content, left, icon_label, name_label]
+        for widget in widgets:
+            widget.bind("<Button-1>", on_click)
+            widget.bind("<Enter>", on_enter)
+            widget.bind("<Leave>", on_leave)
+        
+        self.module_frames[module_id] = {"frame": item_frame, "widgets": widgets + [right]}
+    
+    def _set_item_colors(self, frame, content, left, right, labels, color):
+        """Set colors for module item"""
+        for widget in [frame, content, left, right] + labels:
+            widget.configure(bg=color)
+    
+    def _on_toggle_change(self, module_id):
+        """Handle toggle change"""
+        if module_id in self.module_vars and self.module_vars[module_id]:
+            enabled = self.module_vars[module_id].get()
+            print(f"[ModuleSettings] {module_id} toggled to: {enabled}")
+            
+            # Update settings immediately
+            if module_id not in self.settings:
+                self.settings[module_id] = {}
+            self.settings[module_id]["enabled"] = enabled
+    
+    def _update_selection(self, module_id):
+        """Update visual selection"""
+        for mid, frame_info in self.module_frames.items():
+            color = "#2d2d5a" if mid == module_id else "#1e1e3f"
+            frame_info["frame"].configure(bg=color)
+            for widget in frame_info["widgets"]:
+                widget.configure(bg=color)
+    
+    def _setup_scrollable_content(self):
+        """Setup scrollable content area"""
+        canvas_frame = tk.Frame(self.content_area, bg="#1a1a3a")
+        canvas_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        self.content_canvas = tk.Canvas(canvas_frame, bg="#0f0f23", highlightthickness=0)
+        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=self.content_canvas.yview)
+        self.content_canvas.configure(yscrollcommand=scrollbar.set)
+        
+        self.content_canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        self.content_frame = tk.Frame(self.content_canvas, bg="#0f0f23")
+        self.content_window = self.content_canvas.create_window(0, 0, anchor="nw", window=self.content_frame)
+        
+        # Bind events
+        self.content_frame.bind("<Configure>", lambda e: self.content_canvas.configure(scrollregion=self.content_canvas.bbox("all")))
+        self.content_canvas.bind("<Configure>", lambda e: self.content_canvas.itemconfig(self.content_window, width=self.content_canvas.winfo_width()))
+        self.content_canvas.bind("<MouseWheel>", lambda e: self.content_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+    
+    def _show_module_settings(self, module_id):
+        """Show settings for specific module"""
+        self.current_module = module_id
+        
+        # Clear content
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        for widget in self.content_header.winfo_children():
+            widget.destroy()
+        
+        # Clear form variables
+        self.form_vars.clear()
+        
+        # Update header
+        module_info = next((m for m in self.modules if m["id"] == module_id), None)
+        if module_info:
+            header_content = tk.Frame(self.content_header, bg="#2d2d5a")
+            header_content.pack(fill="both", expand=True, padx=15, pady=10)
+            tk.Label(header_content, text=f"{module_info['icon']} {module_info['name']}", bg="#2d2d5a", fg="#ffffff",
+                    font=("Segoe UI", 14, "bold")).pack(side="left")
+        
+        # Show appropriate settings
+        if module_id == "autostart_game":
+            self._show_autostart_settings()
+        elif module_id == "auto_gather":
+            self._show_enhanced_gather_settings()
+        elif module_id == "march_assignment":
+            self._show_march_settings()
+    
+    def _show_autostart_settings(self):
+        """Show AutoStart settings"""
+        settings = self.settings.get("autostart_game", {})
+        
+        # Auto-startup section
+        startup_section = self._create_section("Auto-Startup", "🚀", "#2196f3")
+        
+        self.form_vars['auto_startup'] = tk.BooleanVar(value=settings.get("auto_startup", False))
+        
+        if self.instance_running:
+            tk.Label(startup_section, text="🔒 Auto-startup cannot be changed while instance is running", bg="#0f0f23", fg="#ff9800",
+                    font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=5)
+            current_state = "Enabled" if self.form_vars['auto_startup'].get() else "Disabled"
+            tk.Label(startup_section, text=f"Current setting: {current_state}", bg="#0f0f23", fg="#ffffff",
+                    font=("Segoe UI", 10)).pack(anchor="w", pady=2)
+        else:
+            startup_check = tk.Checkbutton(startup_section, text="🎮 Auto-start game when instance starts", variable=self.form_vars['auto_startup'],
+                                          bg="#0f0f23", fg="#2196f3", selectcolor="#1a1a3a", font=("Segoe UI", 10, "bold"), activebackground="#0f0f23")
+            startup_check.pack(anchor="w", pady=5)
+        
+        # Retry settings
+        retry_section = self._create_section("Retry Settings", "🔄", "#ff9800")
+        retry_grid = tk.Frame(retry_section, bg="#0f0f23")
+        retry_grid.pack(fill="x", pady=5)
+        
+        # Max retries
+        tk.Label(retry_grid, text="Max retries:", bg="#0f0f23", fg="#ffffff", font=("Segoe UI", 10)).grid(row=0, column=0, sticky="w", padx=(0, 10))
+        self.form_vars['max_retries'] = tk.StringVar(value=str(settings.get("max_retries", 3)))
+        tk.Spinbox(retry_grid, from_=1, to=10, textvariable=self.form_vars['max_retries'], bg="#1a1a3a", fg="#ffffff", width=5, font=("Segoe UI", 10)).grid(row=0, column=1, sticky="w")
+        
+        # Retry delay
+        tk.Label(retry_grid, text="Delay (sec):", bg="#0f0f23", fg="#ffffff", font=("Segoe UI", 10)).grid(row=0, column=2, sticky="w", padx=(20, 10))
+        self.form_vars['retry_delay'] = tk.StringVar(value=str(settings.get("retry_delay", 10)))
+        tk.Spinbox(retry_grid, from_=5, to=60, textvariable=self.form_vars['retry_delay'], bg="#1a1a3a", fg="#ffffff", width=5, font=("Segoe UI", 10)).grid(row=0, column=3, sticky="w")
+    
+    def _show_enhanced_gather_settings(self):
+        """Show enhanced AutoGather settings with custom loop editor"""
+        settings = self.settings.get("auto_gather", {})
+        
+        # Status section
+        status_section = self._create_section("Module Status", "📊", "#4caf50")
+        
+        # Get current module status if available
+        status_text = "Unknown"
+        if self.app_ref and hasattr(self.app_ref, 'module_manager') and self.app_ref.module_manager:
+            module_status = self.app_ref.module_manager.get_module_status(self.instance_name)
+            gather_status = module_status.get("AutoGather", {})
+            if gather_status.get("running", False):
+                status_text = "✅ Running"
+            elif gather_status.get("available", False):
+                status_text = "⏸️ Available but stopped"
+            else:
+                status_text = "❌ Not available"
+        
+        tk.Label(status_section, text=f"Current Status: {status_text}", bg="#0f0f23", fg="#ffffff",
+                font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=5)
+        
+        # Custom Resource Loop Editor
+        loop_section = self._create_section("Custom Resource Gathering Order", "🔄", "#2196f3")
+        
+        # Instructions
+        instruction_text = ("Create your custom gathering order by adding resources below.\n"
+                           "You can add the same resource multiple times for priority gathering.\n"
+                           "Example: Food, Food, Iron, Food = gather mostly food with some iron")
+        
+        tk.Label(loop_section, text=instruction_text, bg="#0f0f23", fg="#8b949e",
+                font=("Segoe UI", 9), justify="left").pack(anchor="w", pady=(0, 10))
+        
+        # Load current resource loop
+        current_loop = settings.get("resource_loop", ["food", "wood", "iron", "stone"])
+        if isinstance(current_loop, str):
+            current_loop = [r.strip() for r in current_loop.split(',') if r.strip()]
+        self.resource_loop = current_loop.copy()
+        
+        # Resource loop editor
+        self._create_resource_loop_editor(loop_section)
+        
+        # Advanced settings section
+        advanced_section = self._create_section("Advanced Settings", "⚙️", "#9c27b0")
+        
+        # Max queues
+        max_queues_frame = tk.Frame(advanced_section, bg="#0f0f23")
+        max_queues_frame.pack(fill="x", pady=5)
+        
+        tk.Label(max_queues_frame, text="Max march queues to use:", bg="#0f0f23", fg="#ffffff", font=("Segoe UI", 10)).pack(side="left")
+        self.form_vars['max_queues'] = tk.StringVar(value=str(settings.get("max_queues", 6)))
+        queue_spin = tk.Spinbox(max_queues_frame, from_=1, to=6, textvariable=self.form_vars['max_queues'], bg="#1a1a3a", fg="#ffffff",
+                               width=3, font=("Segoe UI", 10))
+        queue_spin.pack(side="left", padx=(10, 0))
+        
+        # Check interval
+        interval_frame = tk.Frame(advanced_section, bg="#0f0f23")
+        interval_frame.pack(fill="x", pady=5)
+        
+        tk.Label(interval_frame, text="Check interval (seconds):", bg="#0f0f23", fg="#ffffff", font=("Segoe UI", 10)).pack(side="left")
+        self.form_vars['check_interval'] = tk.StringVar(value=str(settings.get("check_interval", 60)))
+        interval_spin = tk.Spinbox(interval_frame, from_=30, to=300, textvariable=self.form_vars['check_interval'], bg="#1a1a3a", fg="#ffffff",
+                                  width=5, font=("Segoe UI", 10))
+        interval_spin.pack(side="left", padx=(10, 0))
+    
+    def _create_resource_loop_editor(self, parent):
+        """Create the enhanced resource loop editor"""
+        editor_frame = tk.Frame(parent, bg="#0f0f23")
+        editor_frame.pack(fill="x", pady=5)
+        
+        # Left side - Available resources to add
+        left_frame = tk.Frame(editor_frame, bg="#161b22", relief="solid", bd=1)
+        left_frame.pack(side="left", fill="y", padx=(0, 10))
+        
+        tk.Label(left_frame, text="📦 Available Resources", bg="#161b22", fg="#ffffff",
+                font=("Segoe UI", 10, "bold")).pack(pady=5)
+        
+        # Resource buttons
+        for resource in self.available_resources:
+            btn = tk.Button(left_frame, text=resource["name"], bg=resource["color"], fg="#ffffff",
+                           font=("Segoe UI", 9, "bold"), relief="flat", bd=0, padx=10, pady=5,
+                           cursor="hand2", command=lambda r=resource["id"]: self._add_resource_to_loop(r))
+            btn.pack(fill="x", padx=5, pady=2)
+            
+            # Hover effect
+            def on_enter(event, b=btn, c=resource["color"]):
+                b.configure(bg=self._lighten_color(c))
+            def on_leave(event, b=btn, c=resource["color"]):
+                b.configure(bg=c)
+            btn.bind("<Enter>", on_enter)
+            btn.bind("<Leave>", on_leave)
+        
+        # Right side - Current loop and controls
+        right_frame = tk.Frame(editor_frame, bg="#0f0f23")
+        right_frame.pack(side="left", fill="both", expand=True)
+        
+        # Current loop header with controls
+        loop_header = tk.Frame(right_frame, bg="#0f0f23")
+        loop_header.pack(fill="x", pady=(0, 5))
+        
+        tk.Label(loop_header, text="🔄 Current Gathering Order", bg="#0f0f23", fg="#ffffff",
+                font=("Segoe UI", 10, "bold")).pack(side="left")
+        
+        # Quick action buttons
+        quick_frame = tk.Frame(loop_header, bg="#0f0f23")
+        quick_frame.pack(side="right")
+        
+        clear_btn = tk.Button(quick_frame, text="🗑 Clear", bg="#ff6b6b", fg="#ffffff",
+                             font=("Segoe UI", 8, "bold"), relief="flat", bd=0, padx=8, pady=3,
+                             cursor="hand2", command=self._clear_resource_loop)
+        clear_btn.pack(side="left", padx=(0, 5))
+        
+        preset_btn = tk.Button(quick_frame, text="⚡ Presets", bg="#9c27b0", fg="#ffffff",
+                              font=("Segoe UI", 8, "bold"), relief="flat", bd=0, padx=8, pady=3,
+                              cursor="hand2", command=self._show_preset_menu)
+        preset_btn.pack(side="left")
+        
+        # Loop display and controls
+        loop_container = tk.Frame(right_frame, bg="#161b22", relief="solid", bd=1)
+        loop_container.pack(fill="both", expand=True)
+        
+        # Listbox for current loop
+        listbox_frame = tk.Frame(loop_container, bg="#161b22")
+        listbox_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        self.loop_listbox = tk.Listbox(listbox_frame, bg="#0a0e16", fg="#ffffff", font=("Segoe UI", 10),
+                                      relief="flat", bd=0, selectbackground="#2d2d5a", height=8)
+        scrollbar_loop = tk.Scrollbar(listbox_frame, orient="vertical", command=self.loop_listbox.yview)
+        self.loop_listbox.configure(yscrollcommand=scrollbar_loop.set)
+        
+        self.loop_listbox.pack(side="left", fill="both", expand=True)
+        scrollbar_loop.pack(side="right", fill="y")
+        
+        # Control buttons for loop
+        control_frame = tk.Frame(loop_container, bg="#161b22")
+        control_frame.pack(fill="x", padx=5, pady=(0, 5))
+        
+        move_up_btn = tk.Button(control_frame, text="↑ Move Up", bg="#2196f3", fg="#ffffff",
+                               font=("Segoe UI", 8, "bold"), relief="flat", bd=0, padx=8, pady=3,
+                               cursor="hand2", command=self._move_resource_up)
+        move_up_btn.pack(side="left", padx=(0, 3))
+        
+        move_down_btn = tk.Button(control_frame, text="↓ Move Down", bg="#2196f3", fg="#ffffff",
+                                 font=("Segoe UI", 8, "bold"), relief="flat", bd=0, padx=8, pady=3,
+                                 cursor="hand2", command=self._move_resource_down)
+        move_down_btn.pack(side="left", padx=(0, 3))
+        
+        remove_btn = tk.Button(control_frame, text="✗ Remove", bg="#ff9800", fg="#ffffff",
+                              font=("Segoe UI", 8, "bold"), relief="flat", bd=0, padx=8, pady=3,
+                              cursor="hand2", command=self._remove_selected_resource)
+        remove_btn.pack(side="left")
+        
+        # Update the listbox
+        self._update_loop_display()
+    
+    def _add_resource_to_loop(self, resource_id):
+        """Add a resource to the gathering loop"""
+        self.resource_loop.append(resource_id)
+        self._update_loop_display()
+        print(f"Added {resource_id} to loop. Current loop: {self.resource_loop}")
+    
+    def _remove_selected_resource(self):
+        """Remove selected resource from loop"""
+        selection = self.loop_listbox.curselection()
+        if selection:
+            index = selection[0]
+            if 0 <= index < len(self.resource_loop):
+                removed = self.resource_loop.pop(index)
+                self._update_loop_display()
+                print(f"Removed {removed} from loop. Current loop: {self.resource_loop}")
+    
+    def _move_resource_up(self):
+        """Move selected resource up in the loop"""
+        selection = self.loop_listbox.curselection()
+        if selection:
+            index = selection[0]
+            if index > 0:
+                self.resource_loop[index], self.resource_loop[index-1] = self.resource_loop[index-1], self.resource_loop[index]
+                self._update_loop_display()
+                self.loop_listbox.selection_set(index-1)
+    
+    def _move_resource_down(self):
+        """Move selected resource down in the loop"""
+        selection = self.loop_listbox.curselection()
+        if selection:
+            index = selection[0]
+            if index < len(self.resource_loop) - 1:
+                self.resource_loop[index], self.resource_loop[index+1] = self.resource_loop[index+1], self.resource_loop[index]
+                self._update_loop_display()
+                self.loop_listbox.selection_set(index+1)
+    
+    def _clear_resource_loop(self):
+        """Clear the entire resource loop"""
+        self.resource_loop.clear()
+        self._update_loop_display()
+        print("Cleared resource loop")
+    
+    def _show_preset_menu(self):
+        """Show preset menu"""
+        preset_menu = tk.Menu(self.window, tearoff=0, bg="#2a2a2a", fg="white")
+        
+        presets = [
+            ("Balanced", ["food", "wood", "iron", "stone"]),
+            ("Food Focus", ["food", "food", "food", "wood", "iron", "stone"]),
+            ("Wood Focus", ["wood", "wood", "wood", "food", "iron", "stone"]),
+            ("Iron Focus", ["iron", "iron", "iron", "food", "wood", "stone"]),
+            ("Food+Iron", ["food", "food", "iron", "food", "iron"]),
+            ("Economy Focus", ["food", "wood", "food", "wood", "iron", "stone"])
+        ]
+        
+        for name, loop in presets:
+            preset_menu.add_command(label=name, command=lambda l=loop: self._apply_preset(l))
+        
+        try:
+            preset_menu.tk_popup(self.window.winfo_pointerx(), self.window.winfo_pointery())
+        finally:
+            preset_menu.grab_release()
+    
+    def _apply_preset(self, loop):
+        """Apply a preset resource loop"""
+        self.resource_loop = loop.copy()
+        self._update_loop_display()
+        print(f"Applied preset loop: {self.resource_loop}")
+    
+    def _update_loop_display(self):
+        """Update the loop display listbox"""
+        if not self.loop_listbox:
+            return
+            
+        # Clear current items
+        self.loop_listbox.delete(0, tk.END)
+        
+        # Add items with nice formatting
+        for i, resource_id in enumerate(self.resource_loop):
+            resource_info = next((r for r in self.available_resources if r["id"] == resource_id), None)
+            if resource_info:
+                display_text = f"{i+1:2d}. {resource_info['name']}"
+                self.loop_listbox.insert(tk.END, display_text)
+        
+        # Update summary
+        if hasattr(self, 'loop_summary_label'):
+            self._update_loop_summary()
+    
+    def _update_loop_summary(self):
+        """Update the loop summary display"""
+        if not self.resource_loop:
+            summary = "No resources in loop"
+        else:
+            # Count occurrences
+            counts = {}
+            for resource in self.resource_loop:
+                counts[resource] = counts.get(resource, 0) + 1
+            
+            # Create summary
+            parts = []
+            for resource_id, count in counts.items():
+                resource_info = next((r for r in self.available_resources if r["id"] == resource_id), None)
+                if resource_info:
+                    name = resource_info["name"].split()[1]  # Get name without emoji
+                    if count > 1:
+                        parts.append(f"{name}×{count}")
+                    else:
+                        parts.append(name)
+            
+            summary = f"Loop: {' → '.join(parts)} (Total: {len(self.resource_loop)} steps)"
+        
+        if hasattr(self, 'loop_summary_label'):
+            self.loop_summary_label.configure(text=summary)
+    
+    def _lighten_color(self, hex_color):
+        """Lighten a hex color for hover effects"""
+        try:
+            # Remove # if present
+            hex_color = hex_color.lstrip('#')
+            
+            # Convert to RGB
+            r = int(hex_color[0:2], 16)
+            g = int(hex_color[2:4], 16)
+            b = int(hex_color[4:6], 16)
+            
+            # Lighten by 20%
+            r = min(255, int(r * 1.2))
+            g = min(255, int(g * 1.2))
+            b = min(255, int(b * 1.2))
+            
+            return f"#{r:02x}{g:02x}{b:02x}"
+        except:
+            return hex_color
+    
+    def _show_march_settings(self):
+        """Show march assignment settings"""
+        settings = self.settings.get("march_assignment", {})
+        
+        # Queue setup
+        queue_section = self._create_section("Queue Setup", "⚔️", "#9c27b0")
+        
+        # Unlocked queues
+        queue_frame = tk.Frame(queue_section, bg="#0f0f23")
+        queue_frame.pack(fill="x", pady=5)
+        
+        tk.Label(queue_frame, text="Unlocked queues:", bg="#0f0f23", fg="#ffffff", font=("Segoe UI", 10, "bold")).pack(side="left")
+        self.form_vars['unlocked_queues'] = tk.StringVar(value=str(settings.get("unlocked_queues", 2)))
+        queue_spin = tk.Spinbox(queue_frame, from_=1, to=6, textvariable=self.form_vars['unlocked_queues'], bg="#1a1a3a", fg="#ffffff",
+                               width=3, font=("Segoe UI", 10), command=self._update_queue_display)
+        queue_spin.pack(side="left", padx=(10, 0))
+        
+        # Queue assignments
+        self.queue_assignments_frame = tk.Frame(queue_section, bg="#0f0f23")
+        self.queue_assignments_frame.pack(fill="x", pady=(10, 0))
+        self.form_vars['queue_assignment_vars'] = {}
+        self._update_queue_display()
+    
+    def _update_queue_display(self):
+        """Update queue assignments display"""
+        try:
+            for widget in self.queue_assignments_frame.winfo_children():
+                widget.destroy()
+            
+            self.form_vars['queue_assignment_vars'].clear()
+            
+            unlocked_count = int(self.form_vars['unlocked_queues'].get())
+            current_assignments = self.settings.get("march_assignment", {}).get("queue_assignments", {})
+            
+            for queue_num in range(1, unlocked_count + 1):
+                queue_frame = tk.Frame(self.queue_assignments_frame, bg="#0f0f23")
+                queue_frame.pack(fill="x", pady=1)
+                
+                tk.Label(queue_frame, text=f"Q{queue_num}:", bg="#0f0f23", fg="#ffffff", font=("Segoe UI", 9, "bold"), width=4).pack(side="left")
+                assignment_var = tk.StringVar(value=current_assignments.get(str(queue_num), "AutoGather"))
+                self.form_vars['queue_assignment_vars'][queue_num] = assignment_var
+                
+                combo = ttk.Combobox(queue_frame, textvariable=assignment_var, values=["AutoGather", "Rally/Manual", "Manual Only"],
+                                   state="readonly", width=12, font=("Segoe UI", 8))
+                combo.pack(side="left", padx=(5, 0))
+        except Exception as e:
+            print(f"Error updating queue display: {e}")
+    
+    def _create_section(self, title, icon, color):
+        """Create settings section"""
+        section = tk.Frame(self.content_frame, bg="#1a1a3a", relief="solid", bd=1)
+        section.pack(fill="x", pady=(0, 8))
+        
+        header = tk.Frame(section, bg=color, height=30)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        tk.Label(header, text=f"{icon} {title}", bg=color, fg="#ffffff", font=("Segoe UI", 10, "bold")).pack(side="left", padx=12, pady=6)
+        
+        content = tk.Frame(section, bg="#0f0f23")
+        content.pack(fill="x", padx=15, pady=10)
+        return content
+    
+    def _setup_footer(self):
+        """Setup footer with buttons"""
+        footer = tk.Frame(self.window, bg="#1a1a3a", height=70)
+        footer.pack(fill="x")
+        footer.pack_propagate(False)
+        
+        footer_content = tk.Frame(footer, bg="#1a1a3a")
+        footer_content.pack(fill="both", expand=True, padx=15, pady=10)
+        
+        # Status and summary on left
+        left_info = tk.Frame(footer_content, bg="#1a1a3a")
+        left_info.pack(side="left", fill="both", expand=True)
+        
+        self.status_label = tk.Label(left_info, text="", bg="#1a1a3a", fg="#b0b0b0", font=("Segoe UI", 9))
+        self.status_label.pack(anchor="w")
+        
+        # Loop summary for AutoGather
+        self.loop_summary_label = tk.Label(left_info, text="", bg="#1a1a3a", fg="#00d4ff", font=("Segoe UI", 8))
+        self.loop_summary_label.pack(anchor="w")
+        
+        # Update summary if we're showing AutoGather
+        if self.current_module == "auto_gather":
+            self._update_loop_summary()
+        
+        # Action buttons
+        action_frame = tk.Frame(footer_content, bg="#1a1a3a")
+        action_frame.pack(side="left")
+        
+        # Test button for AutoGather
+        test_btn = tk.Button(action_frame, text="🧪 Test AutoGather", bg="#ff9800", fg="#ffffff", font=("Segoe UI", 9, "bold"),
+                            relief="flat", bd=0, padx=15, pady=8, cursor="hand2", command=self._test_autogather)
+        test_btn.pack(side="left", padx=(0, 10))
+        
+        # Main buttons
+        btn_frame = tk.Frame(footer_content, bg="#1a1a3a")
+        btn_frame.pack(side="right")
+        
+        cancel_btn = tk.Button(btn_frame, text="Cancel", bg="#f44336", fg="#ffffff", font=("Segoe UI", 9, "bold"),
+                              relief="flat", bd=0, padx=20, pady=8, cursor="hand2", command=self._close_window)
+        cancel_btn.pack(side="left", padx=(0, 10))
+        
+        save_btn = tk.Button(btn_frame, text="💾 Save Settings", bg="#4caf50", fg="#ffffff", font=("Segoe UI", 9, "bold"),
+                            relief="flat", bd=0, padx=20, pady=8, cursor="hand2", command=self._save_settings)
+        save_btn.pack(side="left")
+    
+    def _test_autogather(self):
+        """Test AutoGather functionality"""
+        try:
+            if not self.app_ref or not hasattr(self.app_ref, 'module_manager'):
+                self.status_label.configure(text="❌ Module manager not available", fg="#f44336")
+                return
+            
+            self.status_label.configure(text="🧪 Testing AutoGather...", fg="#ff9800")
+            self.window.update()
+            
+            # Try to manually start AutoGather
+            self.app_ref.module_manager.manual_start_autogather(self.instance_name)
+            
+            self.status_label.configure(text="✅ AutoGather test initiated", fg="#4caf50")
+            self.window.after(3000, lambda: self.status_label.configure(text=""))
+            
+        except Exception as e:
+            self.status_label.configure(text=f"❌ Test failed: {str(e)}", fg="#f44336")
+            print(f"AutoGather test error: {e}")
+    
+    def _save_settings(self):
+        """Save all settings with enhanced resource loop support"""
+        try:
+            # AutoStart settings
+            if self.current_module == "autostart_game" or "auto_startup" in self.form_vars:
+                current_auto_startup = self.settings.get("autostart_game", {}).get("auto_startup", False) if self.instance_running else self.form_vars.get('auto_startup', tk.BooleanVar()).get()
+                
+                autostart_settings = {
+                    "enabled": True,
+                    "auto_startup": current_auto_startup
+                }
+                
+                if 'max_retries' in self.form_vars:
+                    autostart_settings["max_retries"] = int(self.form_vars['max_retries'].get())
+                else:
+                    autostart_settings["max_retries"] = self.settings.get("autostart_game", {}).get("max_retries", 3)
+                
+                if 'retry_delay' in self.form_vars:
+                    autostart_settings["retry_delay"] = int(self.form_vars['retry_delay'].get())
+                else:
+                    autostart_settings["retry_delay"] = self.settings.get("autostart_game", {}).get("retry_delay", 10)
+                
+                self.settings["autostart_game"] = autostart_settings
+            
+            # AutoGather settings - ENHANCED with custom loop
+            if self.current_module == "auto_gather" or hasattr(self, 'resource_loop'):
+                # Get enabled status from toggle
+                enabled = True
+                if "auto_gather" in self.module_vars and self.module_vars["auto_gather"]:
+                    enabled = self.module_vars["auto_gather"].get()
+                
+                gather_settings = {
+                    "enabled": enabled
+                }
+                
+                # Save custom resource loop
+                if hasattr(self, 'resource_loop') and self.resource_loop:
+                    gather_settings["resource_loop"] = self.resource_loop
+                    gather_settings["resource_types"] = list(set(self.resource_loop))  # Unique resources for backward compatibility
+                else:
+                    # Keep existing values or use defaults
+                    existing_gather = self.settings.get("auto_gather", {})
+                    gather_settings["resource_loop"] = existing_gather.get("resource_loop", ["food", "wood", "iron", "stone"])
+                    gather_settings["resource_types"] = existing_gather.get("resource_types", ["food", "wood", "iron", "stone"])
+                
+                # Max queues
+                if 'max_queues' in self.form_vars:
+                    gather_settings["max_queues"] = int(self.form_vars['max_queues'].get())
+                else:
+                    gather_settings["max_queues"] = self.settings.get("auto_gather", {}).get("max_queues", 6)
+                
+                # Check interval
+                if 'check_interval' in self.form_vars:
+                    gather_settings["check_interval"] = int(self.form_vars['check_interval'].get())
+                else:
+                    gather_settings["check_interval"] = self.settings.get("auto_gather", {}).get("check_interval", 60)
+                
+                # Other settings
+                gather_settings["max_concurrent_gathers"] = self.settings.get("auto_gather", {}).get("max_concurrent_gathers", 5)
+                
+                self.settings["auto_gather"] = gather_settings
+                
+                # Log the custom loop for debugging
+                print(f"[ModuleSettings] Saved custom resource loop for {self.instance_name}: {gather_settings['resource_loop']}")
+            
+            # March Assignment settings
+            if self.current_module == "march_assignment" or "unlocked_queues" in self.form_vars:
+                # Get enabled status from toggle
+                enabled = True
+                if "march_assignment" in self.module_vars and self.module_vars["march_assignment"]:
+                    enabled = self.module_vars["march_assignment"].get()
+                
+                march_settings = {
+                    "enabled": enabled
+                }
+                
+                if 'unlocked_queues' in self.form_vars:
+                    unlocked_count = int(self.form_vars['unlocked_queues'].get())
+                    march_settings["unlocked_queues"] = unlocked_count
+                else:
+                    march_settings["unlocked_queues"] = self.settings.get("march_assignment", {}).get("unlocked_queues", 2)
+                
+                if 'queue_assignment_vars' in self.form_vars:
+                    queue_assignments = {}
+                    for queue_num, var in self.form_vars['queue_assignment_vars'].items():
+                        assignment = var.get()
+                        queue_assignments[str(queue_num)] = assignment
+                    march_settings["queue_assignments"] = queue_assignments
+                else:
+                    march_settings["queue_assignments"] = self.settings.get("march_assignment", {}).get("queue_assignments", {"1": "AutoGather", "2": "AutoGather"})
+                
+                self.settings["march_assignment"] = march_settings
+            
+            # Save to file
+            with open(self.settings_file, 'w') as f:
+                json.dump(self.settings, f, indent=2)
+            
+            # Show success with loop summary
+            success_msg = "✅ Settings saved successfully!"
+            if hasattr(self, 'resource_loop') and self.resource_loop:
+                success_msg += f" Custom loop: {len(self.resource_loop)} steps"
+            
+            self.status_label.configure(text=success_msg, fg="#4caf50")
+            self.window.after(3000, lambda: self.status_label.configure(text=""))
+            
+            # Notify app and reload settings
+            if self.app_ref:
+                self.app_ref.add_console_message(f"✅ Saved module settings for {self.instance_name}")
+                if hasattr(self.app_ref, 'module_manager') and self.app_ref.module_manager:
+                    self.app_ref.module_manager.reload_instance_settings(self.instance_name)
+                    
+                    # Update AutoGather module settings if it exists
+                    if (self.instance_name in self.app_ref.module_manager.instance_modules and 
+                        "AutoGather" in self.app_ref.module_manager.instance_modules[self.instance_name]):
+                        
+                        autogather_module = self.app_ref.module_manager.instance_modules[self.instance_name]["AutoGather"]
+                        if hasattr(autogather_module, 'update_settings'):
+                            gather_settings = self.settings.get("auto_gather", {})
+                            autogather_module.update_settings(gather_settings)
+                            print(f"[ModuleSettings] Updated AutoGather settings for {self.instance_name}")
+            
+            print(f"[ModuleSettings] Settings saved for {self.instance_name}: {self.settings}")
+            
+        except Exception as e:
+            error_msg = f"❌ Error saving: {str(e)}"
+            self.status_label.configure(text=error_msg, fg="#f44336")
+            print(f"[ModuleSettings] Save error: {e}")
+    
+    def _load_settings(self):
+        """Load settings from file"""
+        default_settings = {
+            "autostart_game": {
+                "enabled": True, 
+                "auto_startup": False, 
+                "max_retries": 3, 
+                "retry_delay": 10
             },
-            'max_queues': {
-                'type': 'number',
-                'label': 'Max Queues',
-                'default': 6,
-                'min': 1,
-                'max': 6,
-                'description': 'Maximum march queues to use'
+            "auto_gather": {
+                "enabled": True, 
+                "resource_types": ["food", "wood", "iron", "stone"],
+                "resource_loop": ["food", "wood", "iron", "stone"],
+                "max_queues": 6,
+                "check_interval": 60,
+                "max_concurrent_gathers": 5
             },
-            'enabled': {
-                'type': 'boolean',
-                'label': 'Enabled',
-                'default': True,
-                'description': 'Enable automatic resource gathering'
+            "march_assignment": {
+                "enabled": True, 
+                "unlocked_queues": 2, 
+                "queue_assignments": {
+                    "1": "AutoGather", 
+                    "2": "AutoGather"
+                }
             }
         }
-    }
-
-
-# Export the module for dynamic import
-__all__ = ['AutoGather', 'register_module']
-
-    def _verify_resource_selection_screen(self) -> bool:
-        """Verify we're in resource selection screen"""
+        
         try:
-            screenshot_path = self._take_screenshot()
-            if not screenshot_path:
-                return False
-            
-            try:
-                indicators = ["plus_button.png", "bread_icon.png", "wood_icon.png"]
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r') as f:
+                    loaded_settings = json.load(f)
                 
-                for indicator in indicators:
-                    if self._template_exists(screenshot_path, indicator, threshold=0.6):
-                        return True
+                # Merge loaded settings with defaults
+                for module_key, module_defaults in default_settings.items():
+                    if module_key not in loaded_settings:
+                        loaded_settings[module_key] = module_defaults.copy()
+                    else:
+                        # Merge individual settings
+                        for setting_key, default_value in module_defaults.items():
+                            if setting_key not in loaded_settings[module_key]:
+                                loaded_settings[module_key][setting_key] = default_value
                 
-                return False
+                print(f"[ModuleSettings] Loaded settings for {self.instance_name}: {loaded_settings}")
+                return loaded_settings
                 
-            finally:
-                self._cleanup_screenshot(screenshot_path)
-                
-        except Exception:
-            return False
+        except Exception as e:
+            print(f"[ModuleSettings] Error loading settings for {self.instance_name}: {e}")
+        
+        print(f"[ModuleSettings] Using default settings for {self.instance_name}")
+        return default_settings
+    
+    def _close_window(self):
+        """Close the window"""
+        self.window.destroy()
 
-    def _perform_scroll_to_reveal_resources(self) -> bool:
-        """Scroll to reveal resources"""
-        try:
-            scroll_start = (400, 570)
-            scroll_end = (80, 570)
-            
-            steps = 5
-            for i in range(steps):
-                x = scroll_start[0] + (scroll_end[0] - scroll_start[0]) * i / (steps - 1)
-                y = scroll_start[1] + (scroll_end[1] - scroll_start[1]) * i / (steps - 1)
-                self.adb_utils.run_adb_command(self.instance_index, f"input tap {int(x)} {int(y)}")
-                time.sleep(0.1)
-            
-            time.sleep(1)
-            return True
-        except Exception:
-            return False
 
-    def _select_resource_type(self, resource_type: str) -> bool:
-        """Select the specified resource type"""
-        try:
-            icon_file = self.RESOURCE_ICONS.get(resource_type.lower())
-            if not icon_file:
-                return False
-            
-            screenshot_path = self._take_screenshot()
-            if not screenshot_path:
-                return False
-            
-            try:
-                confidences = [0.6, 0.5, 0.4]
-                
-                for confidence in confidences:
-                    if self._click_template_if_found(screenshot_path, icon_file, threshold=confidence):
-                        time.sleep(1)
-                        return True
-                
-                return False
-                
-            finally:
-                self._cleanup_screenshot(screenshot_path)
-                
-        except Exception:
-            return False
+# Export functions for compatibility
+def show_improved_module_settings(parent, instance_name, app_ref=None):
+    """Show the improved module settings window"""
+    try:
+        return ImprovedModuleSettings(parent, instance_name, app_ref)
+    except Exception as e:
+        messagebox.showerror("Error", f"Could not open module settings: {str(e)}")
+        return None
 
-    def _set_max_level_and_search(self) -> bool:
-        """Set maximum level and search for resources"""
-        try:
-            if not self._set_max_level():
-                return False
-            
-            return self._search_for_available_resource()
-        except Exception:
-            return False
-
-    def _set_max_level(self) -> bool:
-        """Set resource level to maximum"""
-        try:
-            screenshot_path = self._take_screenshot()
-            if not screenshot_path:
-                return False
-            
-            try:
-                matches = self._find_template_matches(screenshot_path, "plus_button.png", threshold=0.6)
-                if matches:
-                    plus_location = matches[0]['location']
-                    
-                    for i in range(8):
-                        self.adb_utils.run_adb_command(self.instance_index, f"input tap {plus_location[0]} {plus_location[1]}")
-                        time.sleep(0.1)
-                    
-                    return True
-                
-                return False
-                
-            finally:
-                self._cleanup_screenshot(screenshot_path)
-                
-        except Exception:
-            return False
-
-    def _search_for_available_resource(self) -> bool:
-        """Search for available resources at different levels"""
-        try:
-            for level in range(8, 0, -1):
-                if self._click_search_resource_button() and self._wait_and_check_for_gather_button():
-                    return True
-                
-                if level > 1 and not self._reduce_level():
-                    return False
-            
-            return False
-        except Exception:
-            return False
-
-    def _click_search_resource_button(self) -> bool:
-        """Click search resource button"""
-        try:
-            search_resource_position = (237, 789)
-            return self.adb_utils.run_adb_command(self.instance_index, f"input tap {search_resource_position[0]} {search_resource_position[1]}") is not None
-        except Exception:
-            return False
-
-    def _wait_and_check_for_gather_button(self) -> bool:
-        """Wait and check for gather button"""
-        try:
-            time.sleep(3)
-            
-            screenshot_path = self._take_screenshot()
-            if not screenshot_path:
-                return False
-            
-            try:
-                if self._template_exists(screenshot_path, "gather_button.png", threshold=0.6):
-                    if self._click_template_if_found(screenshot_path, "gather_button.png", threshold=0.6):
-                        time.sleep(1)
-                        return True
-                
-                return False
-                
-            finally:
-                self._cleanup_screenshot(screenshot_path)
-                
-        except Exception:
-            return False
-
-    def _reduce_level(self) -> bool:
-        """Reduce level by clicking minus button"""
-        try:
-            screenshot_path = self._take_screenshot()
-            if not screenshot_path:
-                return False
-            
-            try:
-                if self._click_template_if_found(screenshot_path, "minus_button.png", threshold=0.6):
-                    time.sleep(0.3)
-                    return True
-                
-                return False
-                
-            finally:
-                self._cleanup_screenshot(screenshot_path)
+# Legacy compatibility exports
+show_slim_module_settings = show_improved_module_settings
+show_improved_king_shot_module_settings = show_improved_module_settings
+show_king_shot_module_settings = show_improved_module_settings
+show_modules_window = show_improved_module_settings
